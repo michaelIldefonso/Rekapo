@@ -1,6 +1,12 @@
-Must not have an ID TEN T error
-
 fastapi
-uvicorn
-torch
-git+https://github.com/openai/whisper.git
+uvicorn[standard]
+faster-whisper
+websockets
+python-multipart
+sqlalchemy
+psycopg2-binary
+alembic
+pydantic[email]
+google-auth
+PyJWT
+python-dotenv

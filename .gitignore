@@ -1,0 +1,109 @@
+# ----- Python -----
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+pip-wheel-metadata/
+
+# Unit test / coverage
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+.coverage
+.coverage.*
+.cache/
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+htmlcov/
+
+# Type checkers / linters
+.pytype/
+.dmypy.json
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Environment files / secrets
+.env
+.env.*
+*.env
+
+# Editors / IDE
+.vscode/
+.idea/
+*.code-workspace
+
+# Logs
+logs/
+*.log
+
+# Databases
+*.sqlite
+*.sqlite3
+*.db
+*.db3
+*.sqlitedb
+
+# Audio / large media
+audio/
+audiios/
+*.wav
+*.mp3
+*.m4a
+*.flac
+*.ogg
+*.opus
+
+# Model artifacts (keep code, ignore weights)
+**/checkpoints/
+**/models/
+*.pt
+*.pth
+*.onnx
+*.bin
+*.safetensors
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Misc caches
+*.pid
+*.seed
+
+# Node (just in case)
+node_modules/
+
+# Local tooling
+.tox/
+.nox/
+.coverage.*
