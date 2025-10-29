@@ -1,1 +1,6 @@
 Must not have an ID TEN T error
+
+fastapi
+uvicorn
+torch
+git+https://github.com/openai/whisper.git
