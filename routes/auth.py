@@ -60,6 +60,7 @@ def google_mobile_auth(payload: GoogleAuthRequest, db: Session = Depends(get_db)
     # Find or create user
     user = db.query(User).filter_by(google_id=google_id).first()
     if not user:
+        # First login: Create user with Google info
         user = User(
             google_id=google_id,
             email=email,
@@ -71,16 +72,18 @@ def google_mobile_auth(payload: GoogleAuthRequest, db: Session = Depends(get_db)
         db.add(user)
         db.commit()
         db.refresh(user)
-        logger.info("Created user: %s", safe_user_log_dict(user))
+        logger.info("Created new user: %s", safe_user_log_dict(user))
     else:
-        # Update info if needed
-        user.email = email
-        user.name = name
-        user.profile_picture_path = picture
-        user.data_usage_consent = payload.data_usage_consent
-        db.commit()
-        db.refresh(user)
-        logger.info("Updated user: %s", safe_user_log_dict(user))
+        # Subsequent logins: Keep all existing user data unchanged
+        logger.info("User logged in: %s", safe_user_log_dict(user))
+    
+    # Check if user account is disabled
+    if user.is_disabled:
+        logger.warning("Disabled user attempted login: %s", safe_user_log_dict(user))
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your account has been disabled. Please contact support."
+        )
 
     # Generate JWT
     token_data = {
