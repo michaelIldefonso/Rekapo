@@ -20,8 +20,9 @@ class UserResponse(UserBase):
     id: int
     google_id: str
     profile_picture_path: Optional[str] = None
-    is_admin: bool
-    is_disabled: bool
+    data_usage_consent: bool
+    is_admin: Optional[bool] = None
+    is_disabled: Optional[bool] = None
     created_at: datetime
     
     class Config:
@@ -107,3 +108,17 @@ class TranscriptionResponse(BaseModel):
     language_probability: Optional[float] = None
     duration: Optional[float] = None
     segments: Optional[List[dict]] = None
+
+# User Profile Update Schemas
+class ChangeUsernameRequest(BaseModel):
+    username: str = Field(..., min_length=3, max_length=50, description="New username (3-50 characters)")
+
+class ChangeUsernameResponse(BaseModel):
+    success: bool
+    message: str
+    username: str
+
+class UploadProfilePhotoResponse(BaseModel):
+    success: bool
+    message: str
+    profile_picture_path: str
