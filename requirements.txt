@@ -10,3 +10,4 @@ pydantic[email]
 google-auth
 PyJWT
 python-dotenv
+requests
