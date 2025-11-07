@@ -39,16 +39,20 @@ class AuthResponse(BaseModel):
 
 @router.post("/auth/google-mobile", response_model=AuthResponse)
 def google_mobile_auth(payload: GoogleAuthRequest, db: Session = Depends(get_db)):
+    logger.info("=== Starting Google mobile auth request ===")
+    logger.info("Consent provided: %s", payload.data_usage_consent)
+    
     try:
         # Verify Google ID token
+        logger.info("Verifying Google ID token...")
         idinfo = id_token.verify_oauth2_token(
             payload.id_token, grequests.Request(), GOOGLE_CLIENT_ID
         )
         if idinfo["iss"] not in ["accounts.google.com", "https://accounts.google.com"]:
             raise ValueError("Wrong issuer.")
-        logger.info("Google ID token verified; email=%s", mask_email(idinfo.get("email")))
+        logger.info("✓ Google ID token verified successfully; email=%s", mask_email(idinfo.get("email")))
     except Exception as e:
-        logger.warning("Google token verification failed: %s", str(e))
+        logger.warning("✗ Google token verification failed: %s", str(e))
         raise HTTPException(status_code=401, detail="Invalid Google token")
 
     # Extract user info
@@ -56,11 +60,21 @@ def google_mobile_auth(payload: GoogleAuthRequest, db: Session = Depends(get_db)
     email = idinfo["email"]
     name = idinfo.get("name")
     picture = idinfo.get("picture")
+    
+    logger.info("Extracted Google info - ID: %s, Name: %s, Has picture: %s", 
+                google_id[:10] + "...", name, picture is not None)
 
     # Find or create user
+    logger.info("Checking if user exists in database (google_id=%s)...", google_id[:10] + "...")
     user = db.query(User).filter_by(google_id=google_id).first()
+    
+    is_new_user = user is None
+    
     if not user:
         # First login: Create user with Google info
+        logger.info("🆕 NEW USER SIGNUP - Creating new user account")
+        logger.info("New user details - Email: %s, Name: %s, Consent: %s", 
+                   mask_email(email), name, payload.data_usage_consent)
         user = User(
             google_id=google_id,
             email=email,
@@ -72,20 +86,26 @@ def google_mobile_auth(payload: GoogleAuthRequest, db: Session = Depends(get_db)
         db.add(user)
         db.commit()
         db.refresh(user)
-        logger.info("Created new user: %s", safe_user_log_dict(user))
+        logger.info("✓ NEW USER CREATED - User ID: %s, Email: %s", user.id, mask_email(user.email))
     else:
         # Subsequent logins: Keep all existing user data unchanged
-        logger.info("User logged in: %s", safe_user_log_dict(user))
+        logger.info("🔄 EXISTING USER LOGIN - User found in database")
+        logger.info("Existing user - ID: %s, Email: %s, Username: %s, Created: %s", 
+                   user.id, mask_email(user.email), user.username, user.created_at)
+        logger.info("User data preserved (NOT overwritten): name=%s, username=%s, profile_picture=%s, consent=%s",
+                   user.name, user.username, user.profile_picture_path is not None, user.data_usage_consent)
     
     # Check if user account is disabled
     if user.is_disabled:
-        logger.warning("Disabled user attempted login: %s", safe_user_log_dict(user))
+        logger.warning("⚠️ DISABLED USER ATTEMPTED LOGIN - User ID: %s, Email: %s, Disabled at: %s", 
+                      user.id, mask_email(user.email), user.disabled_at)
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Your account has been disabled. Please contact support."
         )
 
     # Generate JWT
+    logger.info("Generating JWT token for user ID: %s", user.id)
     token_data = {
         "sub": str(user.id),
         "email": user.email,
@@ -94,7 +114,10 @@ def google_mobile_auth(payload: GoogleAuthRequest, db: Session = Depends(get_db)
     access_token = jwt.encode(token_data, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
     # Log the user data we're about to send back (without token)
-    logger.info("Sending user data response: %s", safe_user_log_dict(user))
+    logger.info("✓ Auth successful - Returning response for %s user (ID: %s)", 
+               "NEW" if is_new_user else "EXISTING", user.id)
+    logger.info("Response user data: %s", safe_user_log_dict(user))
+    logger.info("=== Auth request completed successfully ===")
 
     return AuthResponse(
         access_token=access_token,
