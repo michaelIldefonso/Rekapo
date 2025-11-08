@@ -54,7 +54,7 @@ class User(Base):
     name = Column(String(255), comment="Full name from Google OAuth")
     username = Column(String(255), unique=True, comment="UC9: User customizable display name")
     profile_picture_path = Column(String(500), nullable=True, comment="UC9: Custom profile image path")
-    data_usage_consent = Column(Boolean, nullable=False, server_default=text("FALSE"))
+    data_usage_consent = Column(Boolean, nullable=False, server_default=text("TRUE"))
     is_admin = Column(Boolean, nullable=False, server_default=text("FALSE"))
     is_disabled = Column(Boolean, nullable=False, server_default=text("FALSE"), comment="UC8: Disable User Account")
     disabled_at = Column(DateTime, nullable=True)

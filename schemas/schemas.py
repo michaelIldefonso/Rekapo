@@ -10,7 +10,7 @@ class UserBase(BaseModel):
 
 class UserCreate(UserBase):
     google_id: str
-    data_usage_consent: bool = False
+    data_usage_consent: bool = True
 
 class UserUpdate(BaseModel):
     username: Optional[str] = None
@@ -122,3 +122,11 @@ class UploadProfilePhotoResponse(BaseModel):
     success: bool
     message: str
     profile_picture_path: str
+
+class DataUsageConsentRequest(BaseModel):
+    data_usage_consent: bool = Field(..., description="Whether user consents to data usage")
+
+class DataUsageConsentResponse(BaseModel):
+    success: bool
+    message: str
+    data_usage_consent: bool

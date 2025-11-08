@@ -7,7 +7,9 @@ from schemas.schemas import (
     ChangeUsernameRequest,
     ChangeUsernameResponse,
     UploadProfilePhotoResponse,
-    UserResponse
+    UserResponse,
+    DataUsageConsentRequest,
+    DataUsageConsentResponse
 )
 from utils.utils import save_profile_photo, delete_profile_photo, get_logger
 
@@ -152,3 +154,29 @@ async def delete_current_user_photo(
         "success": True,
         "message": "Profile photo deleted successfully"
     }
+
+
+@router.patch("/users/me/consent", response_model=DataUsageConsentResponse)
+async def update_data_usage_consent(
+    request: DataUsageConsentRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Update the current user's data usage consent.
+    
+    - **data_usage_consent**: Boolean flag indicating consent (true/false)
+    """
+    current_user.data_usage_consent = request.data_usage_consent
+    db.commit()
+    db.refresh(current_user)
+    
+    logger.info(
+        f"User {current_user.id} updated data_usage_consent to {request.data_usage_consent}"
+    )
+    
+    return DataUsageConsentResponse(
+        success=True,
+        message="Data usage consent updated successfully",
+        data_usage_consent=current_user.data_usage_consent
+    )
