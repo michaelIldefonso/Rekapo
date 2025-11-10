@@ -1,6 +1,10 @@
 fastapi
 uvicorn[standard]
 faster-whisper
+transformers
+torch
+sentencepiece
+protobuf
 websockets
 python-multipart
 sqlalchemy

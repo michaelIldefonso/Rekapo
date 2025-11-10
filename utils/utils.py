@@ -87,6 +87,8 @@ async def save_profile_photo(file: UploadFile, user_id: int) -> str:
 	Raises:
 		HTTPException: If file validation fails
 	"""
+	from config.config import PROFILE_PHOTOS_DIR, PROFILE_PHOTOS_RELATIVE_PATH
+	
 	# Validate file extension
 	file_ext = Path(file.filename).suffix.lower()
 	if file_ext not in ALLOWED_IMAGE_EXTENSIONS:
@@ -104,19 +106,18 @@ async def save_profile_photo(file: UploadFile, user_id: int) -> str:
 		)
 	
 	# Create upload directory if it doesn't exist
-	upload_dir = Path("uploads/profile_photos")
-	upload_dir.mkdir(parents=True, exist_ok=True)
+	PROFILE_PHOTOS_DIR.mkdir(parents=True, exist_ok=True)
 	
 	# Generate unique filename
 	unique_filename = f"user_{user_id}_{uuid.uuid4().hex[:8]}{file_ext}"
-	file_path = upload_dir / unique_filename
+	file_path = PROFILE_PHOTOS_DIR / unique_filename
 	
 	# Save file
 	with open(file_path, "wb") as f:
 		f.write(contents)
 	
-	# Return relative path
-	return str(file_path).replace("\\", "/")
+	# Return relative path (for database storage)
+	return f"{PROFILE_PHOTOS_RELATIVE_PATH}/{unique_filename}"
 
 
 def delete_profile_photo(file_path: str) -> bool:

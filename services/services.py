@@ -16,6 +16,8 @@ class ConnectionManager:
         self.connection_sessions: Dict[WebSocket, int] = {}
         # Track active recording sessions
         self.active_sessions: Dict[int, dict] = {}
+        # Store transcriptions for summarization (every 10 chunks)
+        self.session_transcriptions: Dict[int, list] = {}
     
     async def connect(self, websocket: WebSocket, session_id: Optional[int] = None):
         """Accept and track a new WebSocket connection."""
@@ -30,6 +32,7 @@ class ConnectionManager:
                     "segment_count": 0,
                     "connections": []
                 }
+                self.session_transcriptions[session_id] = []
             self.active_sessions[session_id]["connections"].append(websocket)
     
     def disconnect(self, websocket: WebSocket):
@@ -46,6 +49,9 @@ class ConnectionManager:
                 # Remove session if no more connections
                 if not self.active_sessions[session_id]["connections"]:
                     del self.active_sessions[session_id]
+                    # Clean up transcriptions
+                    if session_id in self.session_transcriptions:
+                        del self.session_transcriptions[session_id]
             del self.connection_sessions[websocket]
     
     async def send_personal_message(self, message: str, websocket: WebSocket):
@@ -100,3 +106,25 @@ class ConnectionManager:
     def get_session_info(self, session_id: int) -> Optional[dict]:
         """Get information about an active session."""
         return self.active_sessions.get(session_id)
+    
+    def add_transcription(self, session_id: int, transcription: dict):
+        """Add a transcription to the session buffer."""
+        if session_id not in self.session_transcriptions:
+            self.session_transcriptions[session_id] = []
+        self.session_transcriptions[session_id].append(transcription)
+    
+    def get_transcriptions(self, session_id: int) -> list:
+        """Get all transcriptions for a session."""
+        return self.session_transcriptions.get(session_id, [])
+    
+    def clear_transcriptions(self, session_id: int):
+        """Clear transcriptions buffer for a session."""
+        if session_id in self.session_transcriptions:
+            self.session_transcriptions[session_id] = []
+    
+    def should_summarize(self, session_id: int, chunk_threshold: int = 10) -> bool:
+        """Check if it's time to summarize (every N chunks)."""
+        if session_id in self.active_sessions:
+            segment_count = self.active_sessions[session_id]["segment_count"]
+            return segment_count > 0 and segment_count % chunk_threshold == 0
+        return False

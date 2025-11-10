@@ -29,6 +29,9 @@ class UserResponse(UserBase):
         from_attributes = True
 
 # Session Schemas
+class CreateSessionRequest(BaseModel):
+    session_title: Optional[str] = Field(default="Untitled Meeting", max_length=255, description="Title for the meeting session")
+
 class SessionCreate(BaseModel):
     session_title: Optional[str] = "Untitled Meeting"
     user_id: int

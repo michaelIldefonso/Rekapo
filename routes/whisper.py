@@ -7,8 +7,11 @@ from pathlib import Path
 from datetime import datetime
 
 from ai_models.whisper.inference import transcribe_audio_file
+from ai_models.translator.inference import auto_detect_and_translate
+from ai_models.llm.llm import translate_taglish_to_english
+from ai_models.summarizer.inference import summarize_transcriptions
 from services.services import ConnectionManager
-from db.db import get_db, RecordingSegment, Session as DBSession
+from db.db import get_db, RecordingSegment, Summary, Session as DBSession, SessionLocal
 from schemas.schemas import AudioChunkMessage, TranscriptionResponse
 
 router = APIRouter()
@@ -36,16 +39,21 @@ async def websocket_transcribe(websocket: WebSocket):
     
     Response format:
     {
-        "status": "processing" | "success" | "error",
+        "status": "processing" | "success" | "error" | "summary",
         "message": "...",
         "session_id": 123,
         "segment_number": 1,
-        "transcription": "...",  # Taglish transcription
-        "english_translation": null,  # Will add translation later
-        "language": "tl",  # detected language (Tagalog)
+        "transcription": "...",  # Original transcription
+        "english_translation": "...",  # English translation
+        "language": "tl",  # detected language
         "language_probability": 0.95,
         "duration": 3.5,
         "segments": [...]  # detailed segments with timestamps
+        
+        # For summary (every 10 chunks):
+        "summary": "...",  # Summary of last 10 chunks
+        "chunk_count": 10,
+        "is_summary": true
     }
     """
     await manager.connect(websocket)
@@ -109,20 +117,39 @@ async def websocket_transcribe(websocket: WebSocket):
                     str(audio_path),
                     model_name_or_path=model,
                     language=language,
-                    vad_filter=True  # Filter non-speech
+                    device="cuda",  # Use GPU
+                    vad_filter=False  # VAD handled on frontend
                 )
                 
-                # TODO: Add English translation using LLM
-                # english_translation = await translate_to_english(result["text"])
+                # Force detected language to be either Tagalog or English
+                # If Whisper detects another language, default to Tagalog
+                if result["language"] not in ["tl", "en"]:
+                    result["language"] = "tl"  # Default to Tagalog for non-English
                 
-                # Send success response
+                # Translate to English using LLM (better for Taglish code-switching)
+                english_translation = None
+                
+                try:
+                    # Use LLM for Taglish translation (handles code-switching better than mBART)
+                    translation_result = translate_taglish_to_english(
+                        text=result["text"],
+                        device="cuda",  # GPU with CUDA 13.0
+                        max_new_tokens=256
+                    )
+                    english_translation = translation_result["translated_text"]
+                except Exception as e:
+                    print(f"Translation error: {e}")
+                    # Continue without translation if it fails
+                    english_translation = result["text"]
+                
+                # Send success response to user immediately
                 response = {
                     "status": "success",
                     "message": "Transcription completed",
                     "session_id": session_id,
                     "segment_number": segment_number,
                     "transcription": result["text"],
-                    "english_translation": None,  # Will implement translation
+                    "english_translation": english_translation,
                     "language": result["language"],
                     "language_probability": result["language_probability"],
                     "duration": result["duration"],
@@ -131,9 +158,79 @@ async def websocket_transcribe(websocket: WebSocket):
                 
                 await websocket.send_json(response)
                 
-                # Store in database (async operation, don't block)
-                # This would need proper async DB session
-                # For now, the route handler should save to DB separately
+                # After sending to user, save to database
+                try:
+                    db = SessionLocal()
+                    recording_segment = RecordingSegment(
+                        session_id=session_id,
+                        segment_number=segment_number,
+                        audio_path=str(audio_path),
+                        transcript_text=result["text"],
+                        english_translation=english_translation
+                    )
+                    db.add(recording_segment)
+                    db.commit()
+                    db.close()
+                except Exception as e:
+                    print(f"Database save error: {e}")
+                
+                # Store transcription for summarization
+                manager.add_transcription(session_id, {
+                    "segment_number": segment_number,
+                    "transcription": result["text"],
+                    "english_translation": english_translation,
+                    "language": result["language"],
+                    "duration": result["duration"]
+                })
+                
+                # Check if we should generate a summary (every 10 chunks)
+                if manager.should_summarize(session_id, chunk_threshold=10):
+                    try:
+                        # Get all transcriptions for this session
+                        transcriptions = manager.get_transcriptions(session_id)
+                        
+                        # Generate summary
+                        summary_result = summarize_transcriptions(
+                            transcriptions=transcriptions[-10:],  # Last 10 chunks
+                            device="cuda",  # GPU with CUDA 13.0
+                            max_length=200,
+                            min_length=50
+                        )
+                        
+                        # Send summary to client
+                        await websocket.send_json({
+                            "status": "summary",
+                            "message": f"Summary generated for chunks {segment_number-9} to {segment_number}",
+                            "session_id": session_id,
+                            "summary": summary_result["summary"],
+                            "chunk_count": summary_result["chunk_count"],
+                            "is_summary": True
+                        })
+                        
+                        # Save summary to database
+                        try:
+                            db = SessionLocal()
+                            summary = Summary(
+                                session_id=session_id,
+                                chunk_range_start=segment_number - 9,
+                                chunk_range_end=segment_number,
+                                summary_text=summary_result["summary"]
+                            )
+                            db.add(summary)
+                            db.commit()
+                            db.close()
+                        except Exception as e:
+                            print(f"Summary database save error: {e}")
+                        
+                    except Exception as e:
+                        print(f"Summarization error: {e}")
+                        await websocket.send_json({
+                            "status": "error",
+                            "message": f"Summarization failed: {str(e)}",
+                            "is_summary": True
+                        })
+                
+                # Database operations are now handled inline above
                 
             except json.JSONDecodeError:
                 await websocket.send_json({

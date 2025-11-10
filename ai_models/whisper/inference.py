@@ -4,7 +4,7 @@ import os
 # Global model instance for reuse
 _model_cache = {}
 
-def get_transcriber(model_name_or_path: str = "small", device: str = "auto", compute_type: str = "auto"):
+def get_transcriber(model_name_or_path: str = "medium", device: str = "auto", compute_type: str = "auto"):
     """
     Loads the faster-whisper model.
     Uses caching to avoid reloading the same model.

@@ -7,7 +7,9 @@ from pathlib import Path
 from routes.whisper import router as transcribe_router
 from routes.auth import router as auth_router
 from routes.users import router as users_router
+from routes.sessions import router as sessions_router
 from db.db import init_db
+from config.config import PROFILE_PHOTOS_DIR
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -17,9 +19,8 @@ async def lifespan(app: FastAPI):
     print("Database initialized successfully")
     
     # Ensure upload directories exist
-    upload_dir = Path("uploads/profile_photos")
-    upload_dir.mkdir(parents=True, exist_ok=True)
-    print(f"Upload directory ensured: {upload_dir}")
+    PROFILE_PHOTOS_DIR.mkdir(parents=True, exist_ok=True)
+    print(f"Upload directory ensured: {PROFILE_PHOTOS_DIR}")
     
     yield
     # Shutdown: cleanup if needed
@@ -45,9 +46,11 @@ app.add_middleware(
 app.include_router(transcribe_router, prefix="/api", tags=["Transcription"])
 app.include_router(auth_router, prefix="/api", tags=["Auth"])
 app.include_router(users_router, prefix="/api", tags=["Users"])
+app.include_router(sessions_router, prefix="/api", tags=["Sessions"])
 
 # Mount static files for serving uploaded profile photos
-app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+from config.config import UPLOADS_DIR
+app.mount("/uploads", StaticFiles(directory=str(UPLOADS_DIR)), name="uploads")
 
 @app.get("/")
 async def root():
@@ -58,6 +61,8 @@ async def root():
         "docs": "/docs",
         "features": [
             "Real-time transcription with faster-whisper",
+            "Automatic translation with mBART (50+ languages)",
+            "Smart summarization every 10 chunks",
             "WebSocket support for mobile voice chunks",
             "VAD-based audio segmentation",
             "Taglish support (Tagalog + English)",
