@@ -3,12 +3,15 @@ from sqlalchemy.orm import Session
 from datetime import datetime
 from typing import List
 
-from db.db import get_db, Session as DBSession, User
+from db.db import get_db, Session as DBSession, User, RecordingSegment, Summary
 from routes.auth import get_current_user
 from schemas.schemas import (
     CreateSessionRequest,
     SessionResponse,
-    SessionUpdate
+    SessionUpdate,
+    SessionDetailResponse,
+    SessionRecordingSegmentResponse,
+    SessionSummaryResponse
 )
 from utils.utils import get_logger
 
@@ -100,6 +103,12 @@ async def list_sessions(
         DBSession.user_id == current_user.id,
         DBSession.is_deleted == False
     ).order_by(DBSession.start_time.desc()).offset(skip).limit(limit).all()
+    
+    # Fix sessions with missing created_at
+    for session in sessions:
+        if session.created_at is None:
+            session.created_at = datetime.now()
+    db.commit()
     
     return [SessionResponse.model_validate(session) for session in sessions]
 
@@ -209,3 +218,88 @@ async def delete_session(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete session"
         )
+
+
+@router.get("/sessions/{session_id}/details", response_model=SessionDetailResponse)
+async def get_session_details(
+    session_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Get complete session details including all recording segments, transcriptions, 
+    translations, and summaries.
+    
+    Returns:
+    - Session basic information (title, start/end time, status)
+    - All recording segments with transcription and translation
+    - All generated summaries
+    - Statistics (total segments, total duration)
+    
+    Users can only access their own sessions.
+    """
+    # Fetch session with relationships
+    session = db.query(DBSession).filter(
+        DBSession.id == session_id,
+        DBSession.user_id == current_user.id,
+        DBSession.is_deleted == False
+    ).first()
+    
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session not found"
+        )
+    
+    # Fix missing created_at
+    if session.created_at is None:
+        session.created_at = datetime.now()
+        db.commit()
+    
+    # Fetch all recording segments ordered by segment_number
+    recording_segments = db.query(RecordingSegment).filter(
+        RecordingSegment.session_id == session_id
+    ).order_by(RecordingSegment.segment_number).all()
+    
+    # Fix segments with missing created_at
+    for segment in recording_segments:
+        if segment.created_at is None:
+            segment.created_at = datetime.now()
+    
+    # Fetch all summaries ordered by chunk_range_start
+    summaries = db.query(Summary).filter(
+        Summary.session_id == session_id
+    ).order_by(Summary.chunk_range_start).all()
+    
+    # Commit any timestamp fixes
+    db.commit()
+    
+    # Calculate total duration from segments (if available)
+    total_duration = None
+    # Note: Duration is not stored in RecordingSegment, so we'll leave it as None
+    # If you want to add duration tracking, add a 'duration' column to RecordingSegment
+    
+    # Build response
+    response_data = {
+        "id": session.id,
+        "user_id": session.user_id,
+        "session_title": session.session_title,
+        "start_time": session.start_time,
+        "end_time": session.end_time,
+        "status": session.status,
+        "created_at": session.created_at,
+        "recording_segments": [
+            SessionRecordingSegmentResponse.model_validate(segment)
+            for segment in recording_segments
+        ],
+        "summaries": [
+            SessionSummaryResponse.model_validate(summary)
+            for summary in summaries
+        ],
+        "total_segments": len(recording_segments),
+        "total_duration": total_duration
+    }
+    
+    logger.info(f"User {current_user.id} accessed details for session {session_id}")
+    
+    return SessionDetailResponse(**response_data)

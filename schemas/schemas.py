@@ -133,3 +133,46 @@ class DataUsageConsentResponse(BaseModel):
     success: bool
     message: str
     data_usage_consent: bool
+
+# Session History Detail Schemas
+class SessionRecordingSegmentResponse(BaseModel):
+    id: int
+    segment_number: int
+    audio_path: str
+    transcript_text: Optional[str] = None
+    english_translation: Optional[str] = None
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+class SessionSummaryResponse(BaseModel):
+    id: int
+    chunk_range_start: int
+    chunk_range_end: int
+    summary_text: str
+    generated_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+class SessionDetailResponse(BaseModel):
+    # Session info
+    id: int
+    user_id: int
+    session_title: str
+    start_time: datetime
+    end_time: Optional[datetime] = None
+    status: str
+    created_at: datetime
+    
+    # Related data
+    recording_segments: List[SessionRecordingSegmentResponse] = []
+    summaries: List[SessionSummaryResponse] = []
+    
+    # Statistics
+    total_segments: int = 0
+    total_duration: Optional[float] = None
+    
+    class Config:
+        from_attributes = True
