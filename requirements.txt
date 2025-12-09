@@ -1,8 +1,9 @@
+--extra-index-url https://download.pytorch.org/whl/nightly/cu133
+torch --pre
 fastapi
 uvicorn[standard]
 faster-whisper
 transformers
-torch
 sentencepiece
 protobuf
 websockets
@@ -12,6 +13,7 @@ psycopg2-binary
 alembic
 pydantic[email]
 google-auth
+google-auth-oauthlib
 PyJWT
 python-dotenv
 requests

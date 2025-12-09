@@ -8,6 +8,8 @@ from routes.whisper import router as transcribe_router
 from routes.auth import router as auth_router
 from routes.users import router as users_router
 from routes.sessions import router as sessions_router
+from admin.admin_auth import router as admin_auth_router
+from admin.admin_users import router as admin_users_router
 from db.db import init_db
 from config.config import PROFILE_PHOTOS_DIR
 
@@ -47,6 +49,8 @@ app.include_router(transcribe_router, prefix="/api", tags=["Transcription"])
 app.include_router(auth_router, prefix="/api", tags=["Auth"])
 app.include_router(users_router, prefix="/api", tags=["Users"])
 app.include_router(sessions_router, prefix="/api", tags=["Sessions"])
+app.include_router(admin_auth_router, tags=["Admin Auth"])
+app.include_router(admin_users_router, tags=["Admin Users"])
 
 # Mount static files for serving uploaded profile photos
 from config.config import UPLOADS_DIR
