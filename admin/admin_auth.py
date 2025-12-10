@@ -7,6 +7,7 @@ from google_auth_oauthlib.flow import Flow
 from google.oauth2 import id_token
 from google.auth.transport import requests as grequests
 from datetime import datetime
+import time
 from db.db import get_db, User
 from utils.utils import get_logger, mask_email
 from schemas.schemas import UserResponse
@@ -113,12 +114,36 @@ async def admin_callback(request: Request, db: Session = Depends(get_db)):
         credentials = flow.credentials
         
         # Verify the ID token and get user info
+        # Add a short retry loop to tolerate small clock skew between machines
         logger.info("Verifying ID token...")
-        idinfo = id_token.verify_oauth2_token(
-            credentials.id_token,
-            grequests.Request(),
-            GOOGLE_CLIENT_ID
-        )
+        idinfo = None
+        verify_exception = None
+        max_attempts = 3
+        for attempt in range(1, max_attempts + 1):
+            try:
+                idinfo = id_token.verify_oauth2_token(
+                    credentials.id_token,
+                    grequests.Request(),
+                    GOOGLE_CLIENT_ID
+                )
+                verify_exception = None
+                break
+            except Exception as ex:
+                verify_exception = ex
+                msg = str(ex)
+                logger.warning("ID token verification attempt %s failed: %s", attempt, msg)
+                # If token is 'used too early' it's likely a small clock skew; retry briefly
+                if "Token used too early" in msg or "token used too early" in msg.lower():
+                    if attempt < max_attempts:
+                        wait = 2
+                        logger.info("Token appears from the future (clock skew). Waiting %s seconds before retry...", wait)
+                        time.sleep(wait)
+                        continue
+                # For other errors, stop retrying
+                break
+        if idinfo is None:
+            logger.error("ID token verification ultimately failed: %s", verify_exception)
+            raise verify_exception
         
         if idinfo["iss"] not in ["accounts.google.com", "https://accounts.google.com"]:
             raise ValueError("Wrong issuer")
