@@ -75,19 +75,23 @@ MAX_PROFILE_PHOTO_SIZE = 5 * 1024 * 1024  # 5MB
 
 async def save_profile_photo(file: UploadFile, user_id: int) -> str:
 	"""
-	Save uploaded profile photo to disk.
+	Save uploaded profile photo to R2 or local disk.
 	
 	Args:
 		file: The uploaded file
 		user_id: The user's ID for organizing files
 	
 	Returns:
-		The relative path to the saved file
+		The URL or relative path to the saved file
 	
 	Raises:
 		HTTPException: If file validation fails
 	"""
-	from config.config import PROFILE_PHOTOS_DIR, PROFILE_PHOTOS_RELATIVE_PATH
+	from config.config import (
+		PROFILE_PHOTOS_DIR, PROFILE_PHOTOS_RELATIVE_PATH,
+		R2_ENABLED, R2_PROFILE_PHOTOS_PREFIX
+	)
+	from storage.storage import r2_client
 	
 	# Validate file extension
 	file_ext = Path(file.filename).suffix.lower()
@@ -105,37 +109,72 @@ async def save_profile_photo(file: UploadFile, user_id: int) -> str:
 			detail=f"File too large. Maximum size: {MAX_PROFILE_PHOTO_SIZE / (1024*1024):.1f}MB"
 		)
 	
-	# Create upload directory if it doesn't exist
-	PROFILE_PHOTOS_DIR.mkdir(parents=True, exist_ok=True)
-	
 	# Generate unique filename
 	unique_filename = f"user_{user_id}_{uuid.uuid4().hex[:8]}{file_ext}"
-	file_path = PROFILE_PHOTOS_DIR / unique_filename
 	
-	# Save file
-	with open(file_path, "wb") as f:
-		f.write(contents)
+	# Determine content type
+	content_type_map = {
+		'.jpg': 'image/jpeg',
+		'.jpeg': 'image/jpeg',
+		'.png': 'image/png',
+		'.gif': 'image/gif',
+		'.webp': 'image/webp'
+	}
+	content_type = content_type_map.get(file_ext, 'application/octet-stream')
 	
-	# Return relative path (for database storage)
-	return f"{PROFILE_PHOTOS_RELATIVE_PATH}/{unique_filename}"
+	if R2_ENABLED:
+		# Upload to R2
+		r2_key = f"{R2_PROFILE_PHOTOS_PREFIX}/{unique_filename}"
+		file_url = r2_client.upload_file(
+			file_content=contents,
+			key=r2_key,
+			content_type=content_type
+		)
+		return file_url
+	else:
+		# Save to local storage
+		PROFILE_PHOTOS_DIR.mkdir(parents=True, exist_ok=True)
+		file_path = PROFILE_PHOTOS_DIR / unique_filename
+		
+		with open(file_path, "wb") as f:
+			f.write(contents)
+		
+		# Return relative path (for database storage)
+		return f"{PROFILE_PHOTOS_RELATIVE_PATH}/{unique_filename}"
 
 
 def delete_profile_photo(file_path: str) -> bool:
 	"""
-	Delete a profile photo file if it exists.
+	Delete a profile photo file from R2 or local storage.
 	
 	Args:
-		file_path: The path to the file to delete
+		file_path: The path/URL to the file to delete
 	
 	Returns:
 		True if file was deleted, False if it didn't exist
 	"""
+	from config.config import R2_ENABLED, R2_PROFILE_PHOTOS_PREFIX
+	from storage.storage import r2_client
+	
 	try:
-		path = Path(file_path)
-		if path.exists() and path.is_file():
-			path.unlink()
-			return True
-		return False
+		if R2_ENABLED and (file_path.startswith("r2://") or file_path.startswith("http")):
+			# Extract key from R2 URL or URI
+			if file_path.startswith("http"):
+				# Extract key from public URL (assumes format: https://domain/prefix/filename)
+				parts = file_path.split("/")
+				key = f"{R2_PROFILE_PHOTOS_PREFIX}/{parts[-1]}"
+			else:
+				# Handle r2:// URI
+				key = file_path
+			
+			return r2_client.delete_file(key)
+		else:
+			# Local storage
+			path = Path(file_path)
+			if path.exists() and path.is_file():
+				path.unlink()
+				return True
+			return False
 	except Exception as e:
 		logger = get_logger(__name__)
 		logger.error(f"Error deleting profile photo {file_path}: {e}")

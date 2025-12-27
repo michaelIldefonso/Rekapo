@@ -13,11 +13,13 @@ from ai_models.summarizer.inference import summarize_transcriptions
 from services.services import ConnectionManager
 from db.db import get_db, RecordingSegment, Summary, Session as DBSession, SessionLocal
 from schemas.schemas import AudioChunkMessage, TranscriptionResponse
+from config.config import R2_ENABLED, R2_AUDIO_PREFIX
+from storage.storage import r2_client
 
 router = APIRouter()
 manager = ConnectionManager()
 
-# Directory to store audio files
+# Directory to store audio files (fallback for local storage)
 AUDIO_STORAGE_DIR = Path("audiios")
 AUDIO_STORAGE_DIR.mkdir(exist_ok=True)
 
@@ -103,11 +105,45 @@ async def websocket_transcribe(websocket: WebSocket):
                 # Save audio file permanently for the session
                 filename = message.get("filename", f"segment_{segment_number}.wav")
                 suffix = Path(filename).suffix or ".wav"
-                audio_path = AUDIO_STORAGE_DIR / f"session_{session_id}" / f"segment_{segment_number}{suffix}"
-                audio_path.parent.mkdir(parents=True, exist_ok=True)
                 
-                with open(audio_path, "wb") as f:
-                    f.write(audio_data)
+                # Determine content type for audio
+                content_type_map = {
+                    '.wav': 'audio/wav',
+                    '.mp3': 'audio/mpeg',
+                    '.m4a': 'audio/mp4',
+                    '.ogg': 'audio/ogg',
+                    '.webm': 'audio/webm'
+                }
+                content_type = content_type_map.get(suffix.lower(), 'audio/wav')
+                
+                # Variable to track if we need to clean up temp file
+                temp_file_to_cleanup = None
+                
+                if R2_ENABLED:
+                    # Upload to R2 for permanent storage
+                    r2_key = f"{R2_AUDIO_PREFIX}/session_{session_id}/segment_{segment_number}{suffix}"
+                    audio_path_str = r2_client.upload_file(
+                        file_content=audio_data,
+                        key=r2_key,
+                        content_type=content_type
+                    )
+                    
+                    # Whisper needs a local file, so create a temporary one
+                    temp_audio_path = AUDIO_STORAGE_DIR / f"temp_session_{session_id}_segment_{segment_number}{suffix}"
+                    temp_audio_path.parent.mkdir(parents=True, exist_ok=True)
+                    with open(temp_audio_path, "wb") as f:
+                        f.write(audio_data)
+                    
+                    # Use temp file for transcription
+                    audio_path = temp_audio_path
+                    temp_file_to_cleanup = temp_audio_path
+                else:
+                    # Save to local storage (permanent)
+                    audio_path = AUDIO_STORAGE_DIR / f"session_{session_id}" / f"segment_{segment_number}{suffix}"
+                    audio_path.parent.mkdir(parents=True, exist_ok=True)
+                    with open(audio_path, "wb") as f:
+                        f.write(audio_data)
+                    audio_path_str = str(audio_path)
                 
                 # Transcribe with faster-whisper
                 language = message.get("language", None)  # Auto-detect Tagalog/English
@@ -164,7 +200,7 @@ async def websocket_transcribe(websocket: WebSocket):
                     recording_segment = RecordingSegment(
                         session_id=session_id,
                         segment_number=segment_number,
-                        audio_path=str(audio_path),
+                        audio_path=audio_path_str,  # Store R2 URL or local path
                         transcript_text=result["text"],
                         english_translation=english_translation
                     )
@@ -173,6 +209,13 @@ async def websocket_transcribe(websocket: WebSocket):
                     db.close()
                 except Exception as e:
                     print(f"Database save error: {e}")
+                finally:
+                    # Clean up temporary file if using R2
+                    if temp_file_to_cleanup and temp_file_to_cleanup.exists():
+                        try:
+                            temp_file_to_cleanup.unlink()
+                        except Exception as e:
+                            print(f"Failed to cleanup temp file: {e}")
                 
                 # Store transcription for summarization
                 manager.add_transcription(session_id, {
