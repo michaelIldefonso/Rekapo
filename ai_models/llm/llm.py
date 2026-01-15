@@ -100,6 +100,16 @@ Translate this to English: {text}<|im_end|>
         else:
             translated_text = full_output.strip()
         
+        # Remove system prompt text if it accidentally got included
+        system_prompts_to_remove = [
+            "You are a translator specializing in Taglish",
+            "Translate the following text to pure English",
+            "Keep the meaning accurate and natural"
+        ]
+        for prompt_text in system_prompts_to_remove:
+            if prompt_text in translated_text:
+                translated_text = translated_text.replace(prompt_text, "").strip()
+        
         return {
             "translated_text": translated_text,
             "model_used": model_name
