@@ -50,7 +50,12 @@ def transcribe_audio_file(
     device: str = "auto",
     compute_type: str = "auto",
     beam_size: int = 5,
-    vad_filter: bool = True
+    vad_filter: bool = True,
+    temperature: float = 0.2,
+    repetition_penalty: float = 1.1,
+    no_repeat_ngram_size: int = 3,
+    compression_ratio_threshold: float = 2.4,
+    condition_on_previous_text: bool = True
 ) -> dict:
     """
     Transcribes an audio file using faster-whisper.
@@ -64,6 +69,11 @@ def transcribe_audio_file(
         compute_type: "int8", "float16", "float32", or "auto"
         beam_size: Beam size for decoding (higher = more accurate but slower)
         vad_filter: Enable Voice Activity Detection to filter out non-speech
+        temperature: Sampling temperature (lower = more deterministic, default 0.2)
+        repetition_penalty: Penalty for repeated tokens (default 1.1)
+        no_repeat_ngram_size: Prevent repeating n-grams of this size (default 3)
+        compression_ratio_threshold: Threshold for detecting low-quality outputs (default 2.4)
+        condition_on_previous_text: Use previous text as context (default True)
     """
     if not audio_path:
         raise ValueError("audio_path must be provided and non-empty.")
@@ -77,13 +87,18 @@ def transcribe_audio_file(
     except Exception as e:
         raise RuntimeError(f"Error initializing model: {e}")
 
-    # Transcribe
+    # Transcribe with improved generation parameters
     try:
         segments, info = model.transcribe(
             audio_path,
             language=language,
             beam_size=beam_size,
-            vad_filter=vad_filter
+            vad_filter=vad_filter,
+            temperature=temperature,
+            repetition_penalty=repetition_penalty,
+            no_repeat_ngram_size=no_repeat_ngram_size,
+            compression_ratio_threshold=compression_ratio_threshold,
+            condition_on_previous_text=condition_on_previous_text
         )
         
         # Collect all segments

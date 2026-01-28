@@ -25,4 +25,4 @@ R2_PROFILE_PHOTOS_PREFIX = "profile_photos"
 R2_AUDIO_PREFIX = "audios"
 
 # Whisper Model Configuration
-WHISPER_MODEL_PATH = os.getenv("WHISPER_MODEL_PATH", "ai_models/whisper/models/checkpoint-3200")
+WHISPER_MODEL_PATH = os.getenv("WHISPER_MODEL_PATH", "ai_models/whisper/models/whisper-small-fine-tuned-ct2")

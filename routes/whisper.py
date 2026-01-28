@@ -36,7 +36,10 @@ async def websocket_transcribe(websocket: WebSocket):
         "audio": "base64_encoded_audio_data",
         "filename": "chunk_1.wav",  # optional
         "language": null,  # optional, auto-detect if null
-        "model": "small"  # optional: tiny, base, small, medium, large-v3
+        "model": "small",  # optional: tiny, base, small, medium, large-v3
+        "temperature": 0.2,  # optional: sampling temperature (lower = more deterministic)
+        "repetition_penalty": 1.1,  # optional: penalty for repeated tokens
+        "no_repeat_ngram_size": 3  # optional: prevent repeating n-grams
     }
     
     Response format:
@@ -149,12 +152,20 @@ async def websocket_transcribe(websocket: WebSocket):
                 language = message.get("language", None)  # Auto-detect Tagalog/English
                 model = message.get("model", "small")
                 
+                # Get optional generation parameters for improved quality
+                temperature = message.get("temperature", 0.2)
+                repetition_penalty = message.get("repetition_penalty", 1.1)
+                no_repeat_ngram_size = message.get("no_repeat_ngram_size", 3)
+                
                 result = transcribe_audio_file(
                     str(audio_path),
                     model_name_or_path=model,
                     language=language,
                     device="cuda",  # Use GPU
-                    vad_filter=False  # VAD handled on frontend
+                    vad_filter=False,  # VAD handled on frontend
+                    temperature=temperature,
+                    repetition_penalty=repetition_penalty,
+                    no_repeat_ngram_size=no_repeat_ngram_size
                 )
                 
                 # Force detected language to be either Tagalog or English
