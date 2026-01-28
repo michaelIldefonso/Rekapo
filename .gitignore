@@ -91,6 +91,9 @@ audiios/
 *.bin
 *.safetensors
 
+# Whisper fine-tuned models
+ai_models/whisper/models/
+
 # OS files
 .DS_Store
 Thumbs.db

@@ -1,19 +1,25 @@
 from faster_whisper import WhisperModel
 import os
+from pathlib import Path
+from config.config import WHISPER_MODEL_PATH
 
 # Global model instance for reuse
 _model_cache = {}
 
-def get_transcriber(model_name_or_path: str = "medium", device: str = "auto", compute_type: str = "auto"):
+def get_transcriber(model_name_or_path: str = None, device: str = "auto", compute_type: str = "auto"):
     """
     Loads the faster-whisper model.
     Uses caching to avoid reloading the same model.
     
     Args:
-        model_name_or_path: Model size (tiny, base, small, medium, large-v2, large-v3) or path
+        model_name_or_path: Model size (tiny, base, small, medium, large-v2, large-v3), URL, or path
         device: "cpu", "cuda", or "auto" (auto-detects)
         compute_type: "int8", "float16", "float32", or "auto"
     """
+    # Use configured model if no path specified
+    if model_name_or_path is None:
+        model_name_or_path = WHISPER_MODEL_PATH
+    
     cache_key = f"{model_name_or_path}_{device}_{compute_type}"
     
     if cache_key not in _model_cache:
@@ -39,7 +45,7 @@ def get_transcriber(model_name_or_path: str = "medium", device: str = "auto", co
 
 def transcribe_audio_file(
     audio_path: str,
-    model_name_or_path: str = "small",
+    model_name_or_path: str = None,
     language: str = None,
     device: str = "auto",
     compute_type: str = "auto",
@@ -52,7 +58,7 @@ def transcribe_audio_file(
     
     Args:
         audio_path: Path to audio file
-        model_name_or_path: Model size or path
+        model_name_or_path: Model size, URL, or local path (defaults to WHISPER_MODEL_PATH from .env)
         language: Language code (e.g., 'en', 'es') or None for auto-detection
         device: "cpu", "cuda", or "auto"
         compute_type: "int8", "float16", "float32", or "auto"
