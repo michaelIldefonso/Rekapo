@@ -26,3 +26,10 @@ R2_AUDIO_PREFIX = "audios"
 
 # Whisper Model Configuration
 WHISPER_MODEL_PATH = os.getenv("WHISPER_MODEL_PATH", "ai_models/whisper/models/whisper-small-fine-tuned-ct2")
+
+# Translation Configuration
+# Options: "nllb" (lighter, ~2.7GB) or "qwen" (heavier, ~8GB, better quality)
+TRANSLATION_MODEL = os.getenv("TRANSLATION_MODEL", "nllb").lower()
+
+# Preprocessing for Taglish (applies phonetic correction, dictionary lookup, context analysis)
+ENABLE_TAGLISH_PREPROCESSING = os.getenv("ENABLE_TAGLISH_PREPROCESSING", "true").lower() == "true"

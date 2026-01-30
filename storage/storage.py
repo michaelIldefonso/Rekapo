@@ -196,6 +196,50 @@ class R2Client:
                 logger.error(f"Failed to delete local file {path}: {e}")
                 return False
     
+    def copy_file(self, source_key: str, dest_key: str) -> str:
+        """
+        Copy a file within R2 storage (more efficient than download+upload).
+        
+        Args:
+            source_key: The source object key
+            dest_key: The destination object key
+        
+        Returns:
+            The URL or path to the copied file
+        
+        Raises:
+            Exception: If copy fails
+        """
+        if self.r2_enabled:
+            try:
+                # Handle r2:// URI format
+                if source_key.startswith("r2://"):
+                    source_key = source_key.replace(f"r2://{self.bucket_name}/", "")
+                if dest_key.startswith("r2://"):
+                    dest_key = dest_key.replace(f"r2://{self.bucket_name}/", "")
+                
+                # Use S3 copy_object for efficient server-side copy
+                copy_source = {'Bucket': self.bucket_name, 'Key': source_key}
+                self.s3_client.copy_object(
+                    CopySource=copy_source,
+                    Bucket=self.bucket_name,
+                    Key=dest_key
+                )
+                
+                logger.info(f"Copied {source_key} to {dest_key} in R2")
+                
+                # Return public URL if configured, otherwise return the key
+                if self.public_url:
+                    return f"{self.public_url}/{dest_key}"
+                else:
+                    return f"r2://{self.bucket_name}/{dest_key}"
+                
+            except ClientError as e:
+                logger.error(f"Failed to copy {source_key} to {dest_key} in R2: {e}")
+                raise Exception(f"R2 copy failed: {str(e)}")
+        else:
+            raise ValueError("copy_file only available when R2 is enabled")
+    
     def file_exists(self, key: str, local_path: Optional[Path] = None) -> bool:
         """
         Check if a file exists in R2 or local storage.

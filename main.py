@@ -69,7 +69,7 @@ async def root():
         "docs": "/docs",
         "features": [
             "Real-time transcription with faster-whisper",
-            "Automatic translation with mBART (50+ languages)",
+            "Automatic translation with NLLB-200 (200+ languages)",
             "Smart summarization every 10 chunks",
             "WebSocket support for mobile voice chunks",
             "VAD-based audio segmentation",

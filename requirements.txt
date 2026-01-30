@@ -4,6 +4,8 @@ fastapi
 uvicorn[standard]
 faster-whisper
 transformers
+accelerate
+bitsandbytes
 sentencepiece
 protobuf
 websockets
@@ -14,6 +16,7 @@ alembic
 pydantic[email]
 google-auth
 google-auth-oauthlib
+# google-genai
 PyJWT
 python-dotenv
 requests

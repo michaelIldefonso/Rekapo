@@ -112,6 +112,10 @@ class ConnectionManager:
         if session_id not in self.session_transcriptions:
             self.session_transcriptions[session_id] = []
         self.session_transcriptions[session_id].append(transcription)
+        
+        # Prevent memory leak: keep only last 50 transcriptions per session
+        if len(self.session_transcriptions[session_id]) > 50:
+            self.session_transcriptions[session_id] = self.session_transcriptions[session_id][-50:]
     
     def get_transcriptions(self, session_id: int) -> list:
         """Get all transcriptions for a session."""
