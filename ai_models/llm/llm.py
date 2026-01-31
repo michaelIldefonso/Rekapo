@@ -8,8 +8,8 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 import torch
 from typing import Optional
 
-# Import preprocessing functions from separate module
-from .preprocessing import preprocess_taglish_text
+# Import preprocessing functions from preprocessing module
+from ai_models.preprocessing import preprocess_taglish_text
 
 # Global model and tokenizer cache
 _model = None

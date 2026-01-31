@@ -26,6 +26,51 @@ manager = ConnectionManager()
 AUDIO_STORAGE_DIR = Path("audiios")
 AUDIO_STORAGE_DIR.mkdir(exist_ok=True)
 
+# ANSI color codes for terminal output
+class Colors:
+    HEADER = '\033[95m'
+    BLUE = '\033[94m'
+    CYAN = '\033[96m'
+    GREEN = '\033[92m'
+    YELLOW = '\033[93m'
+    RED = '\033[91m'
+    ENDC = '\033[0m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
+
+def log_to_mobile(message_type: str, data: dict, session_id: str = None):
+    """Log messages being sent to mobile app with colored output"""
+    timestamp = datetime.now().strftime("%H:%M:%S")
+    
+    if message_type == "connected":
+        print(f"{Colors.GREEN}[{timestamp}] 📱 → MOBILE: Connection established{Colors.ENDC}")
+    
+    elif message_type == "processing":
+        print(f"{Colors.CYAN}[{timestamp}] 📱 → MOBILE [{session_id}]: Processing segment...{Colors.ENDC}")
+    
+    elif message_type == "transcription":
+        text = data.get('transcription', '')[:60]
+        translation = data.get('english_translation', '')[:60]
+        lang = data.get('language', '')
+        seg_num = data.get('segment_number', '')
+        print(f"{Colors.GREEN}[{timestamp}] 📱 → MOBILE [{session_id}] Segment #{seg_num}:{Colors.ENDC}")
+        print(f"  {Colors.BOLD}Original ({lang}):{Colors.ENDC} {text}...")
+        print(f"  {Colors.BOLD}Translation:{Colors.ENDC} {translation}...")
+    
+    elif message_type == "summary":
+        summary = data.get('summary', '')[:80]
+        chunk_count = data.get('chunk_count', '')
+        print(f"{Colors.BLUE}[{timestamp}] 📱 → MOBILE [{session_id}]: Summary (chunks: {chunk_count}):{Colors.ENDC}")
+        print(f"  {summary}...")
+    
+    elif message_type == "skipped":
+        reason = data.get('message', '')
+        print(f"{Colors.YELLOW}[{timestamp}] 📱 → MOBILE [{session_id}]: Skipped - {reason}{Colors.ENDC}")
+    
+    elif message_type == "error":
+        error = data.get('message', '')
+        print(f"{Colors.RED}[{timestamp}] 📱 → MOBILE: Error - {error}{Colors.ENDC}")
+
 # Print active translation configuration
 print(f"🌐 Translation Model: {TRANSLATION_MODEL.upper()}")
 print(f"📝 Taglish Preprocessing: {'ENABLED' if ENABLE_TAGLISH_PREPROCESSING else 'DISABLED'}")
@@ -211,10 +256,12 @@ async def websocket_transcribe(websocket: WebSocket):
     await manager.connect(websocket)
     
     try:
-        await websocket.send_json({
+        connection_msg = {
             "status": "connected",
             "message": "WebSocket connected. Ready for meeting recording."
-        })
+        }
+        log_to_mobile("connected", connection_msg)
+        await websocket.send_json(connection_msg)
         
         while True:
             # Receive audio chunk from mobile client
@@ -225,17 +272,21 @@ async def websocket_transcribe(websocket: WebSocket):
                 
                 # Validate required fields
                 if "session_id" not in message:
-                    await websocket.send_json({
+                    error_msg = {
                         "status": "error",
                         "message": "Missing 'session_id' field"
-                    })
+                    }
+                    log_to_mobile("error", error_msg)
+                    await websocket.send_json(error_msg)
                     continue
                 
                 if "audio" not in message:
-                    await websocket.send_json({
+                    error_msg = {
                         "status": "error",
                         "message": "Missing 'audio' field"
-                    })
+                    }
+                    log_to_mobile("error", error_msg)
+                    await websocket.send_json(error_msg)
                     continue
                 
                 session_id = message["session_id"]
@@ -246,11 +297,13 @@ async def websocket_transcribe(websocket: WebSocket):
                 temp_segment_id = client_segment_number or datetime.now().timestamp()
                 
                 # Send processing status
-                await websocket.send_json({
+                processing_msg = {
                     "status": "processing",
                     "message": f"Processing segment...",
                     "session_id": session_id
-                })
+                }
+                log_to_mobile("processing", processing_msg, session_id)
+                await websocket.send_json(processing_msg)
                 
                 # Decode base64 audio
                 audio_data = base64.b64decode(message["audio"])
@@ -327,22 +380,26 @@ async def websocket_transcribe(websocket: WebSocket):
                 if not result["text"] or not result["text"].strip():
                     print(f"Skipping empty segment for session {session_id}")
                     await cleanup_invalid_segment(temp_file_to_cleanup, audio_path, audio_path_str, session_id)
-                    await websocket.send_json({
+                    skip_msg = {
                         "status": "skipped",
                         "message": "Segment was empty and was not saved",
                         "session_id": session_id
-                    })
+                    }
+                    log_to_mobile("skipped", skip_msg, session_id)
+                    await websocket.send_json(skip_msg)
                     continue
                 
                 # Check if transcription contains non-Taglish characters
                 if not is_valid_taglish_text(result["text"]):
                     print(f"Skipping segment - contains non-Taglish characters")
                     await cleanup_invalid_segment(temp_file_to_cleanup, audio_path, audio_path_str, session_id)
-                    await websocket.send_json({
+                    skip_msg = {
                         "status": "skipped",
                         "message": "Segment contains non-Taglish characters and was not saved",
                         "session_id": session_id
-                    })
+                    }
+                    log_to_mobile("skipped", skip_msg, session_id)
+                    await websocket.send_json(skip_msg)
                     continue
                 
                 # Assign the official segment number after validation
@@ -414,6 +471,7 @@ async def websocket_transcribe(websocket: WebSocket):
                     "segments": result["segments"]
                 }
                 
+                log_to_mobile("transcription", response, session_id)
                 await websocket.send_json(response)
                 
                 # After sending to user, save to database
@@ -464,14 +522,16 @@ async def websocket_transcribe(websocket: WebSocket):
                         )
                         
                         # Send summary to client
-                        await websocket.send_json({
+                        summary_msg = {
                             "status": "summary",
                             "message": f"Summary generated for chunks {segment_number-9} to {segment_number}",
                             "session_id": session_id,
                             "summary": summary_result["summary"],
                             "chunk_count": summary_result["chunk_count"],
                             "is_summary": True
-                        })
+                        }
+                        log_to_mobile("summary", summary_msg, session_id)
+                        await websocket.send_json(summary_msg)
                         
                         # Save summary to database
                         db_summary = SessionLocal()
@@ -492,24 +552,30 @@ async def websocket_transcribe(websocket: WebSocket):
                         
                     except Exception as e:
                         print(f"Summarization error: {e}")
-                        await websocket.send_json({
+                        error_msg = {
                             "status": "error",
                             "message": f"Summarization failed: {str(e)}",
                             "is_summary": True
-                        })
+                        }
+                        log_to_mobile("error", error_msg)
+                        await websocket.send_json(error_msg)
                 
                 # Database operations are now handled inline above
                 
             except json.JSONDecodeError:
-                await websocket.send_json({
+                error_msg = {
                     "status": "error",
                     "message": "Invalid JSON format"
-                })
+                }
+                log_to_mobile("error", error_msg)
+                await websocket.send_json(error_msg)
             except Exception as e:
-                await websocket.send_json({
+                error_msg = {
                     "status": "error",
                     "message": f"Error: {str(e)}"
-                })
+                }
+                log_to_mobile("error", error_msg)
+                await websocket.send_json(error_msg)
     
     except WebSocketDisconnect:
         manager.disconnect(websocket)

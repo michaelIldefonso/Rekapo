@@ -87,15 +87,22 @@ async def save_profile_photo(file: UploadFile, user_id: int) -> str:
 	Raises:
 		HTTPException: If file validation fails
 	"""
+	logger = get_logger(__name__)
 	from config.config import (
 		PROFILE_PHOTOS_DIR, PROFILE_PHOTOS_RELATIVE_PATH,
 		R2_ENABLED, R2_PROFILE_PHOTOS_PREFIX
 	)
 	from storage.storage import r2_client
 	
+	logger.info(f"📸 Starting profile photo upload for user {user_id}")
+	logger.info(f"🔧 R2 Storage: {'ENABLED' if R2_ENABLED else 'DISABLED'}")
+	
 	# Validate file extension
 	file_ext = Path(file.filename).suffix.lower()
+	logger.info(f"📄 File: {file.filename}, Extension: {file_ext}")
+	
 	if file_ext not in ALLOWED_IMAGE_EXTENSIONS:
+		logger.error(f"❌ Invalid file type: {file_ext}")
 		raise HTTPException(
 			status_code=400,
 			detail=f"Invalid file type. Allowed types: {', '.join(ALLOWED_IMAGE_EXTENSIONS)}"
@@ -103,7 +110,11 @@ async def save_profile_photo(file: UploadFile, user_id: int) -> str:
 	
 	# Validate file size
 	contents = await file.read()
+	file_size_mb = len(contents) / (1024 * 1024)
+	logger.info(f"📏 File size: {file_size_mb:.2f}MB")
+	
 	if len(contents) > MAX_PROFILE_PHOTO_SIZE:
+		logger.error(f"❌ File too large: {file_size_mb:.2f}MB > {MAX_PROFILE_PHOTO_SIZE / (1024*1024):.1f}MB")
 		raise HTTPException(
 			status_code=400,
 			detail=f"File too large. Maximum size: {MAX_PROFILE_PHOTO_SIZE / (1024*1024):.1f}MB"
@@ -111,6 +122,7 @@ async def save_profile_photo(file: UploadFile, user_id: int) -> str:
 	
 	# Generate unique filename
 	unique_filename = f"user_{user_id}_{uuid.uuid4().hex[:8]}{file_ext}"
+	logger.info(f"🔑 Generated filename: {unique_filename}")
 	
 	# Determine content type
 	content_type_map = {
@@ -121,24 +133,34 @@ async def save_profile_photo(file: UploadFile, user_id: int) -> str:
 		'.webp': 'image/webp'
 	}
 	content_type = content_type_map.get(file_ext, 'application/octet-stream')
+	logger.info(f"📦 Content type: {content_type}")
 	
 	if R2_ENABLED:
 		# Upload to R2
 		r2_key = f"{R2_PROFILE_PHOTOS_PREFIX}/{unique_filename}"
-		file_url = r2_client.upload_file(
-			file_content=contents,
-			key=r2_key,
-			content_type=content_type
-		)
-		return file_url
+		logger.info(f"☁️  Uploading to R2: {r2_key}")
+		
+		try:
+			file_url = r2_client.upload_file(
+				file_content=contents,
+				key=r2_key,
+				content_type=content_type
+			)
+			logger.info(f"✅ Successfully uploaded to R2: {file_url}")
+			return file_url
+		except Exception as e:
+			logger.error(f"❌ R2 upload failed: {str(e)}")
+			raise
 	else:
 		# Save to local storage
+		logger.info(f"💾 Saving to local storage: {PROFILE_PHOTOS_DIR / unique_filename}")
 		PROFILE_PHOTOS_DIR.mkdir(parents=True, exist_ok=True)
 		file_path = PROFILE_PHOTOS_DIR / unique_filename
 		
 		with open(file_path, "wb") as f:
 			f.write(contents)
 		
+		logger.info(f"✅ Successfully saved locally")
 		# Return relative path (for database storage)
 		return f"{PROFILE_PHOTOS_RELATIVE_PATH}/{unique_filename}"
 

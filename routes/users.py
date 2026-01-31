@@ -83,28 +83,36 @@ async def upload_profile_photo(
     
     - **file**: Image file (JPG, PNG, GIF, WebP, max 5MB)
     """
+    logger.info(f"\ud83d\udcf8 Profile photo upload request from user {current_user.id}")
+    logger.info(f"\ud83d\udcc4 Filename: {file.filename}, Content-Type: {file.content_type}")
+    
     # Delete old profile photo if it exists and is a local file
     if current_user.profile_picture_path and not current_user.profile_picture_path.startswith("http"):
+        logger.info(f"\ud83d\uddd1\ufe0f Deleting old profile photo: {current_user.profile_picture_path}")
         delete_profile_photo(current_user.profile_picture_path)
     
     # Save new profile photo
     try:
         file_path = await save_profile_photo(file, current_user.id)
-    except HTTPException:
+        logger.info(f"\u2705 Profile photo saved successfully: {file_path}")
+    except HTTPException as e:
+        logger.error(f"\u274c HTTPException during profile photo save: {e.detail}")
         raise
     except Exception as e:
-        logger.error(f"Error saving profile photo for user {current_user.id}: {e}")
+        logger.error(f"\u274c Unexpected error saving profile photo for user {current_user.id}: {type(e).__name__}: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to save profile photo"
         )
     
     # Update user's profile picture path
+    old_path = current_user.profile_picture_path
     current_user.profile_picture_path = file_path
     db.commit()
     db.refresh(current_user)
     
-    logger.info(f"User {current_user.id} updated profile photo to {file_path}")
+    logger.info(f"\ud83d\udcbe Database updated: {old_path} \u2192 {file_path}")
+    logger.info(f"\u2705 User {current_user.id} profile photo update complete!")
     
     return UploadProfilePhotoResponse(
         success=True,

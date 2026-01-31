@@ -12,6 +12,10 @@ from typing import Optional, BinaryIO
 from botocore.exceptions import ClientError
 from botocore.config import Config
 import logging
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +30,11 @@ class R2Client:
         """Initialize R2 client based on environment configuration."""
         self.r2_enabled = os.getenv("R2_ENABLED", "false").lower() == "true"
         
+        logger.info(f"{'='*60}")
+        logger.info(f"\ud83d\udce6 R2 Storage Configuration")
+        logger.info(f"{'='*60}")
+        logger.info(f"\ud83d\udd27 R2_ENABLED: {self.r2_enabled}")
+        
         if self.r2_enabled:
             self.endpoint_url = os.getenv("R2_ENDPOINT_URL")
             self.access_key_id = os.getenv("R2_ACCESS_KEY_ID")
@@ -34,9 +43,17 @@ class R2Client:
             self.region = os.getenv("R2_REGION", "auto")
             self.public_url = os.getenv("R2_PUBLIC_URL", "")
             
+            logger.info(f"\ud83c\udf10 Endpoint: {self.endpoint_url if self.endpoint_url else '❌ NOT SET'}")
+            logger.info(f"\ud83d\udd11 Access Key: {'✅ SET' if self.access_key_id else '❌ NOT SET'}")
+            logger.info(f"\ud83d\udd12 Secret Key: {'✅ SET' if self.secret_access_key else '❌ NOT SET'}")
+            logger.info(f"\ud83e\udea3 Bucket: {self.bucket_name if self.bucket_name else '❌ NOT SET'}")
+            logger.info(f"\ud83c\udf0d Region: {self.region}")
+            logger.info(f"\ud83d\udd17 Public URL: {self.public_url if self.public_url else '❌ NOT SET'}")
+            
             # Validate required configuration
             if not all([self.endpoint_url, self.access_key_id, 
                        self.secret_access_key, self.bucket_name]):
+                logger.error("\u274c R2 is enabled but missing required configuration!")
                 raise ValueError(
                     "R2 is enabled but missing required configuration. "
                     "Please set R2_ENDPOINT_URL, R2_ACCESS_KEY_ID, "
@@ -56,10 +73,12 @@ class R2Client:
                 )
             )
             
-            logger.info(f"R2 storage initialized with bucket: {self.bucket_name}")
+            logger.info(f"\u2705 R2 storage initialized successfully!")
+            logger.info(f"{'='*60}")
         else:
+            logger.info(f"\ud83d\udcbe Using local filesystem storage")
+            logger.info(f"{'='*60}")
             self.s3_client = None
-            logger.info("R2 storage disabled, using local filesystem")
     
     def upload_file(
         self, 
@@ -85,6 +104,12 @@ class R2Client:
         """
         if self.r2_enabled:
             try:
+                logger.info(f"🚀 Uploading to R2: {key}")
+                logger.info(f"📦 Content-Type: {content_type}")
+                logger.info(f"📏 Size: {len(file_content)} bytes")
+                logger.info(f"🪣 Bucket: {self.bucket_name}")
+                logger.info(f"🌐 Endpoint: {self.endpoint_url}")
+                
                 extra_args = {}
                 if content_type:
                     extra_args['ContentType'] = content_type
@@ -97,15 +122,26 @@ class R2Client:
                     **extra_args
                 )
                 
+                logger.info(f"✅ Upload successful")
+                
                 # Return public URL if configured, otherwise return the key
                 if self.public_url:
-                    return f"{self.public_url}/{key}"
+                    file_url = f"{self.public_url}/{key}"
+                    logger.info(f"🔗 Public URL: {file_url}")
+                    return file_url
                 else:
-                    return f"r2://{self.bucket_name}/{key}"
+                    file_uri = f"r2://{self.bucket_name}/{key}"
+                    logger.info(f"🔗 R2 URI: {file_uri}")
+                    return file_uri
                 
             except ClientError as e:
-                logger.error(f"Failed to upload {key} to R2: {e}")
+                logger.error(f"❌ Failed to upload {key} to R2: {e}")
+                logger.error(f"💥 Error code: {e.response.get('Error', {}).get('Code', 'Unknown')}")
+                logger.error(f"💥 Error message: {e.response.get('Error', {}).get('Message', 'Unknown')}")
                 raise Exception(f"R2 upload failed: {str(e)}")
+            except Exception as e:
+                logger.error(f"❌ Unexpected error uploading to R2: {type(e).__name__}: {str(e)}")
+                raise
         else:
             # Local storage fallback
             if not local_fallback_path:

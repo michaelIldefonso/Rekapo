@@ -9,7 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Import ONLY preprocessing (no transformers/torch required)
-from ai_models.llm.preprocessing import preprocess_taglish_text
+from ai_models.preprocessing import preprocess_taglish_text
 
 # LLM translation import commented out to test preprocessing independently
 # from ai_models.llm.llm import translate_taglish_to_english

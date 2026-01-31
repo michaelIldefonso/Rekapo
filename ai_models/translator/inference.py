@@ -1,6 +1,7 @@
 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 import torch
 import sys
+import re
 from pathlib import Path
 
 # Add parent directory to path for preprocessing imports
@@ -8,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 # Import preprocessing pipeline
 try:
-    from ai_models.llm.preprocessing import preprocess_taglish_text
+    from ai_models.preprocessing import preprocess_taglish_text
     PREPROCESSING_AVAILABLE = True
 except ImportError:
     PREPROCESSING_AVAILABLE = False
@@ -16,6 +17,87 @@ except ImportError:
 
 # Global model cache for reuse
 _translator_cache = {}
+
+def post_process_translation(translated: str, original: str) -> str:
+    """
+    Post-process NLLB translation output for better quality.
+    Cleans up common issues: redundancy, capitalization, hallucinations.
+    
+    Args:
+        translated: NLLB output translation
+        original: Original input text
+    
+    Returns:
+        Cleaned translation
+    """
+    if not translated or not translated.strip():
+        return translated
+    
+    # Remove common prefixes that NLLB might add
+    unwanted_prefixes = [
+        "Translation:", "English translation:", "Translation is:",
+        "[Translation]", "English:", "Output:", "Result:"
+    ]
+    for prefix in unwanted_prefixes:
+        if translated.lower().startswith(prefix.lower()):
+            translated = translated[len(prefix):].strip()
+            if translated and translated[0] in [':', '-']:
+                translated = translated[1:].strip()
+    
+    # Remove quotes wrapping entire translation
+    if (translated.startswith('"') and translated.endswith('"')) or \
+       (translated.startswith("'") and translated.endswith("'")):
+        translated = translated[1:-1].strip()
+    
+    # Fix common NLLB over-correction issues
+    # NLLB sometimes repeats words or adds filler
+    words = translated.split()
+    if len(words) > 2:
+        # Remove immediate consecutive duplicates
+        cleaned_words = [words[0]]
+        for i in range(1, len(words)):
+            if words[i].lower() != words[i-1].lower():
+                cleaned_words.append(words[i])
+        translated = " ".join(cleaned_words)
+    
+    # Preserve capitalization of proper nouns from original
+    original_words = original.split()
+    translated_words = translated.split()
+    
+    # Simple heuristic: if original word was capitalized (not at start), keep it
+    for orig_word in original_words:
+        if orig_word and orig_word[0].isupper():
+            # Find similar word in translation and capitalize
+            orig_clean = re.sub(r'[^\w]', '', orig_word.lower())
+            for i, trans_word in enumerate(translated_words):
+                trans_clean = re.sub(r'[^\w]', '', trans_word.lower())
+                if orig_clean == trans_clean or orig_word == trans_word:
+                    # Preserve original capitalization
+                    translated_words[i] = orig_word
+                    break
+    
+    translated = " ".join(translated_words)
+    
+    # Remove trailing/leading whitespace and normalize spaces
+    translated = re.sub(r'\s+', ' ', translated).strip()
+    
+    # Ensure first letter is capitalized
+    if translated and translated[0].islower():
+        translated = translated[0].upper() + translated[1:]
+    
+    # Check if translation is actually in English (basic heuristic)
+    # If it looks like it wasn't translated, return original
+    if len(translated) > 0:
+        # Count Latin alphabet characters
+        latin_chars = sum(1 for c in translated if c.isalpha() and ord(c) < 128)
+        total_chars = sum(1 for c in translated if c.isalpha())
+        
+        if total_chars > 0 and latin_chars / total_chars < 0.8:
+            # Likely not properly translated (too many non-Latin chars)
+            # Return original as fallback
+            return original
+    
+    return translated
 
 def get_translator(model_name: str = "facebook/nllb-200-1.3B", device: str = "auto"):
     """
@@ -133,8 +215,11 @@ def translate_text(
         # Decode translation
         translated_text = tokenizer.batch_decode(generated_tokens, skip_special_tokens=True)[0]
         
+        # Post-process translation for better quality
+        translated_text = post_process_translation(translated_text.strip(), text)
+        
         result = {
-            "translated_text": translated_text.strip(),
+            "translated_text": translated_text,
             "source_lang": source_lang,
             "target_lang": target_lang
         }
@@ -231,9 +316,12 @@ def translate_segments(
             
             translated_text = tokenizer.batch_decode(generated_tokens, skip_special_tokens=True)[0]
             
+            # Post-process translation
+            translated_text = post_process_translation(translated_text.strip(), segment["text"])
+            
             result = {
                 **segment,
-                "translated_text": translated_text.strip()
+                "translated_text": translated_text
             }
             
             # Add preprocessing info if available

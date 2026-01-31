@@ -9,7 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Only import preprocessing (no heavy dependencies)
-from ai_models.llm.preprocessing import preprocess_taglish_text
+from ai_models.preprocessing import preprocess_taglish_text
 
 # Test cases with common Taglish patterns
 test_texts = [

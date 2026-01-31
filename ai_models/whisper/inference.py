@@ -1,10 +1,47 @@
 from faster_whisper import WhisperModel
 import os
+import re
 from pathlib import Path
 from config.config import WHISPER_MODEL_PATH
 
 # Global model instance for reuse
 _model_cache = {}
+
+def clean_transcription_text(text: str) -> str:
+    """
+    Clean transcription text to only include valid characters.
+    Removes phonetic symbols, random Unicode characters, and other noise.
+    
+    Keeps:
+    - English/Tagalog alphabet (A-Z, a-z)
+    - Numbers (0-9)
+    - Common punctuation (.,!?;:'"()-—)
+    - Apostrophes and hyphens
+    - Spaces and newlines
+    
+    Args:
+        text: Raw transcription text
+    
+    Returns:
+        Cleaned text with only valid characters
+    """
+    if not text:
+        return text
+    
+    # Define allowed characters (Latin alphabet + common punctuation)
+    # This covers both English and Tagalog (which uses Latin script)
+    allowed_pattern = r'[A-Za-z0-9\s\.,!?\;:\'\"\(\)\-–—/\n\r]'
+    
+    # Keep only allowed characters
+    cleaned = ''.join(char if re.match(allowed_pattern, char) else ' ' for char in text)
+    
+    # Clean up multiple spaces
+    cleaned = re.sub(r'\s+', ' ', cleaned)
+    
+    # Remove leading/trailing whitespace
+    cleaned = cleaned.strip()
+    
+    return cleaned
 
 def get_transcriber(model_name_or_path: str = None, device: str = "auto", compute_type: str = "auto"):
     """
@@ -64,14 +101,16 @@ def transcribe_audio_file(
     Args:
         audio_path: Path to audio file
         model_name_or_path: Model size, URL, or local path (defaults to WHISPER_MODEL_PATH from .env)
-        language: Language code (e.g., 'en', 'es') or None for auto-detection
+        language: Language code (e.g., 'en', 'es', 'tl') or None for auto-detection
         device: "cpu", "cuda", or "auto"
         compute_type: "int8", "float16", "float32", or "auto"
         beam_size: Beam size for decoding (higher = more accurate but slower)
         vad_filter: Enable Voice Activity Detection to filter out non-speech
         temperature: Sampling temperature (lower = more deterministic, default 0.2)
         repetition_penalty: Penalty for repeated tokens (default 1.1)
+            Note: Set lower (1.0-1.05) for Tagalog to preserve reduplication patterns
         no_repeat_ngram_size: Prevent repeating n-grams of this size (default 3)
+            Note: Safe for Tagalog - only blocks 3+ word repetitions, preserves "bili-bili"
         compression_ratio_threshold: Threshold for detecting low-quality outputs (default 2.4)
         condition_on_previous_text: Use previous text as context (default True)
     """
@@ -86,6 +125,11 @@ def transcribe_audio_file(
         model = get_transcriber(model_name_or_path, device, compute_type)
     except Exception as e:
         raise RuntimeError(f"Error initializing model: {e}")
+    
+    # Adjust repetition penalty for Tagalog to preserve legitimate reduplication
+    if language == "tl" and repetition_penalty > 1.05:
+        print(f"Note: Reducing repetition_penalty from {repetition_penalty} to 1.05 for Tagalog (preserves reduplication)")
+        repetition_penalty = 1.05
 
     # Transcribe with improved generation parameters
     try:
@@ -105,19 +149,23 @@ def transcribe_audio_file(
         all_segments = list(segments)
         full_text = " ".join([segment.text for segment in all_segments])
         
+        # Clean transcription to remove phonetic symbols and unwanted characters
+        full_text_cleaned = clean_transcription_text(full_text)
+        cleaned_segments = [
+            {
+                "start": seg.start,
+                "end": seg.end,
+                "text": clean_transcription_text(seg.text)
+            }
+            for seg in all_segments
+        ]
+        
         return {
-            "text": full_text.strip(),
+            "text": full_text_cleaned,
             "language": info.language,
             "language_probability": info.language_probability,
             "duration": info.duration,
-            "segments": [
-                {
-                    "start": seg.start,
-                    "end": seg.end,
-                    "text": seg.text
-                }
-                for seg in all_segments
-            ]
+            "segments": cleaned_segments
         }
     except Exception as e:
         raise RuntimeError(f"Transcription failed: {e}")
