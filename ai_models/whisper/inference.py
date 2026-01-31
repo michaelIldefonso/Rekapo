@@ -7,6 +7,56 @@ from config.config import WHISPER_MODEL_PATH
 # Global model instance for reuse
 _model_cache = {}
 
+def is_hallucination(text: str, no_speech_prob: float = 0.0) -> bool:
+    """
+    Detect if a transcription is likely a hallucination.
+    
+    Whisper commonly hallucinates phrases when there's no speech:
+    - "You", "Thank you", "Thanks for watching"
+    - Short meaningless phrases
+    - High no_speech_prob indicates silence
+    
+    Args:
+        text: Transcribed text
+        no_speech_prob: Probability of no speech (0.0-1.0)
+    
+    Returns:
+        True if likely hallucination, False otherwise
+    """
+    if not text or not text.strip():
+        return True
+    
+    text_lower = text.strip().lower()
+    
+    # High no_speech probability = likely hallucination
+    if no_speech_prob > 0.6:
+        return True
+    
+    # Common Whisper hallucinations
+    hallucination_phrases = [
+        "you",
+        "thank you",
+        "thanks",
+        "thank you for watching",
+        "thanks for watching",
+        "bye",
+        "goodbye",
+        "...",
+        ".",
+        "?",
+        "!"
+    ]
+    
+    # Check if text exactly matches common hallucinations
+    if text_lower in hallucination_phrases:
+        return True
+    
+    # Very short text (1-2 chars) is likely noise
+    if len(text_lower) <= 2:
+        return True
+    
+    return False
+
 def clean_transcription_text(text: str) -> str:
     """
     Clean transcription text to only include valid characters.
@@ -92,7 +142,8 @@ def transcribe_audio_file(
     repetition_penalty: float = 1.1,
     no_repeat_ngram_size: int = 3,
     compression_ratio_threshold: float = 2.4,
-    condition_on_previous_text: bool = True
+    condition_on_previous_text: bool = True,
+    initial_prompt: str = None
 ) -> dict:
     """
     Transcribes an audio file using faster-whisper.
@@ -113,6 +164,7 @@ def transcribe_audio_file(
             Note: Safe for Tagalog - only blocks 3+ word repetitions, preserves "bili-bili"
         compression_ratio_threshold: Threshold for detecting low-quality outputs (default 2.4)
         condition_on_previous_text: Use previous text as context (default True)
+        initial_prompt: Optional text to guide Whisper's transcription style and improve accuracy
     """
     if not audio_path:
         raise ValueError("audio_path must be provided and non-empty.")
@@ -133,21 +185,42 @@ def transcribe_audio_file(
 
     # Transcribe with improved generation parameters
     try:
-        segments, info = model.transcribe(
-            audio_path,
-            language=language,
-            beam_size=beam_size,
-            vad_filter=vad_filter,
-            temperature=temperature,
-            repetition_penalty=repetition_penalty,
-            no_repeat_ngram_size=no_repeat_ngram_size,
-            compression_ratio_threshold=compression_ratio_threshold,
-            condition_on_previous_text=condition_on_previous_text
-        )
+        # Build transcribe kwargs
+        transcribe_kwargs = {
+            "language": language,
+            "beam_size": beam_size,
+            "vad_filter": vad_filter,
+            "temperature": temperature,
+            "repetition_penalty": repetition_penalty,
+            "no_repeat_ngram_size": no_repeat_ngram_size,
+            "compression_ratio_threshold": compression_ratio_threshold,
+            "condition_on_previous_text": condition_on_previous_text
+        }
         
-        # Collect all segments
+        # Add initial_prompt if provided (guides Whisper for better accuracy)
+        if initial_prompt:
+            transcribe_kwargs["initial_prompt"] = initial_prompt
+        
+        segments, info = model.transcribe(audio_path, **transcribe_kwargs)
+        
+        # Collect all segments and filter hallucinations
         all_segments = list(segments)
-        full_text = " ".join([segment.text for segment in all_segments])
+        
+        # Filter out hallucinations using no_speech_prob
+        valid_segments = []
+        for seg in all_segments:
+            # Get no_speech_prob (defaults to 0.0 if not available)
+            no_speech_prob = getattr(seg, 'no_speech_prob', 0.0)
+            
+            # Skip if detected as hallucination
+            if is_hallucination(seg.text, no_speech_prob):
+                print(f"⚠️  Filtered hallucination: '{seg.text}' (no_speech_prob: {no_speech_prob:.2f})")
+                continue
+            
+            valid_segments.append(seg)
+        
+        # Join text from valid segments only
+        full_text = " ".join([segment.text for segment in valid_segments])
         
         # Clean transcription to remove phonetic symbols and unwanted characters
         full_text_cleaned = clean_transcription_text(full_text)
@@ -155,9 +228,10 @@ def transcribe_audio_file(
             {
                 "start": seg.start,
                 "end": seg.end,
-                "text": clean_transcription_text(seg.text)
+                "text": clean_transcription_text(seg.text),
+                "no_speech_prob": getattr(seg, 'no_speech_prob', 0.0)
             }
-            for seg in all_segments
+            for seg in valid_segments
         ]
         
         return {

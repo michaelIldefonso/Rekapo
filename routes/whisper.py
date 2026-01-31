@@ -227,11 +227,13 @@ async def websocket_transcribe(websocket: WebSocket):
         "segment_number": 1,  # Incremental segment number
         "audio": "base64_encoded_audio_data",
         "filename": "chunk_1.wav",  # optional
-        "language": null,  # optional, auto-detect if null
+        "language": null,  # optional, auto-detect if null (tl/en)
         "model": "small",  # optional: tiny, base, small, medium, large-v3
-        "temperature": 0.2,  # optional: sampling temperature (lower = more deterministic)
+        "beam_size": 5,  # optional: 3-10, higher = more accurate but slower
+        "temperature": 0.2,  # optional: 0.0-1.0, lower = more deterministic
         "repetition_penalty": 1.1,  # optional: penalty for repeated tokens
-        "no_repeat_ngram_size": 3  # optional: prevent repeating n-grams
+        "no_repeat_ngram_size": 3,  # optional: prevent repeating n-grams
+        "initial_prompt": "Meeting in Tagalog and English."  # optional: context for better accuracy
     }
     
     Response format:
@@ -359,16 +361,26 @@ async def websocket_transcribe(websocket: WebSocket):
                 temperature = message.get("temperature", 0.2)
                 repetition_penalty = message.get("repetition_penalty", 1.1)
                 no_repeat_ngram_size = message.get("no_repeat_ngram_size", 3)
+                beam_size = message.get("beam_size", 5)  # Higher = more accurate but slower
+                
+                # Initial prompt for context (optional)
+                # Note: Fine-tuned models often work BETTER without prompts
+                # Test showed prompts can add unwanted text or have no effect
+                # Mobile can still send custom prompts if needed
+                initial_prompt = message.get("initial_prompt", None)
+                # No default prompt - fine-tuned model doesn't need it
                 
                 result = transcribe_audio_file(
                     str(audio_path),
                     model_name_or_path=model,
                     language=language,
                     device="cuda",  # Use GPU
-                    vad_filter=False,  # VAD handled on frontend
+                    vad_filter=True,  # Enable backend VAD (Silero) for better silence detection
+                    beam_size=beam_size,
                     temperature=temperature,
                     repetition_penalty=repetition_penalty,
-                    no_repeat_ngram_size=no_repeat_ngram_size
+                    no_repeat_ngram_size=no_repeat_ngram_size,
+                    initial_prompt=initial_prompt
                 )
                 
                 # Force detected language to be either Tagalog or English
