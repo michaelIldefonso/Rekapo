@@ -1,11 +1,13 @@
-from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
-import torch
+from transformers import AutoTokenizer
+import ctranslate2
 import sys
 import re
 from pathlib import Path
 
 # Add parent directory to path for preprocessing imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
+from config.config import TRANSLATOR_MODEL_PATH
 
 # Import preprocessing pipeline
 try:
@@ -99,33 +101,39 @@ def post_process_translation(translated: str, original: str) -> str:
     
     return translated
 
-def get_translator(model_name: str = "facebook/nllb-200-1.3B", device: str = "auto"):
+def get_translator(model_name: str = None, device: str = "auto"):
     """
-    Loads the NLLB-200 translation model.
+    Loads the NLLB-200 CTranslate2 translation model.
     Uses caching to avoid reloading the same model.
     
     Args:
-        model_name: Model name or path (default: NLLB-200-1.3B)
+        model_name: Model name or path (default: CTranslate2 optimized NLLB)
         device: "cpu", "cuda", or "auto" (auto-detects)
     
     Returns:
-        tuple: (model, tokenizer, device)
+        tuple: (translator, tokenizer, device)
     """
+    # Use configured model if no path specified
+    if model_name is None:
+        model_name = TRANSLATOR_MODEL_PATH
+    
     cache_key = f"{model_name}_{device}"
     
     if cache_key not in _translator_cache:
+        print(f"📦 Loading CTranslate2 translation model: {model_name}")
         try:
             # Auto-detect device if not specified
             if device == "auto":
-                device = "cuda" if torch.cuda.is_available() else "cpu"
+                device = "cuda" if ctranslate2.get_cuda_device_count() > 0 else "cpu"
             
-            # Load tokenizer and model
+            # Load tokenizer from HuggingFace
             tokenizer = AutoTokenizer.from_pretrained(model_name)
-            model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
-            model = model.to(device)
             
-            _translator_cache[cache_key] = (model, tokenizer, device)
-            print(f"✅ Loaded NLLB-200-1.3B translation model on {device}")
+            # Load CTranslate2 model
+            translator = ctranslate2.Translator(model_name, device=device, compute_type="int8")
+            
+            _translator_cache[cache_key] = (translator, tokenizer, device)
+            print(f"✅ Loaded CTranslate2 NLLB-200 (int8 quantized) on {device}")
         except Exception as e:
             raise RuntimeError(f"Failed to load translation model '{model_name}': {e}")
     
@@ -135,7 +143,7 @@ def translate_text(
     text: str,
     source_lang: str = "tgl_Latn",  # Tagalog
     target_lang: str = "eng_Latn",  # English
-    model_name: str = "facebook/nllb-200-1.3B",
+    model_name: str = None,
     device: str = "auto",
     max_length: int = 512,
     num_beams: int = 5,
@@ -190,30 +198,27 @@ def translate_text(
             input_text = text
     
     try:
-        # Load model and tokenizer
-        model, tokenizer, device_used = get_translator(model_name, device)
+        # Load CTranslate2 model and tokenizer
+        translator, tokenizer, device_used = get_translator(model_name, device)
         
-        # Set source and target languages for NLLB
+        # Set source language for tokenizer
         tokenizer.src_lang = source_lang
         
-        # Tokenize input text
-        encoded = tokenizer(input_text, return_tensors="pt", padding=True, truncation=True, max_length=max_length)
-        encoded = {k: v.to(device_used) for k, v in encoded.items()}
+        # Tokenize input text (CTranslate2 expects list of tokens)
+        encoded = tokenizer.convert_ids_to_tokens(tokenizer.encode(input_text))
         
-        # Get target language token ID
-        forced_bos_token_id = tokenizer.convert_tokens_to_ids(target_lang)
-        
-        # Generate translation
-        generated_tokens = model.generate(
-            **encoded,
-            forced_bos_token_id=forced_bos_token_id,
-            max_length=max_length,
-            num_beams=num_beams,
-            early_stopping=True
+        # Translate using CTranslate2
+        results = translator.translate_batch(
+            [encoded],
+            target_prefix=[[target_lang]],
+            max_batch_size=2048,
+            beam_size=num_beams,
+            max_decoding_length=max_length
         )
         
-        # Decode translation
-        translated_text = tokenizer.batch_decode(generated_tokens, skip_special_tokens=True)[0]
+        # Decode translation (CTranslate2 returns tokens)
+        translated_tokens = results[0].hypotheses[0]
+        translated_text = tokenizer.decode(tokenizer.convert_tokens_to_ids(translated_tokens), skip_special_tokens=True)
         
         # Post-process translation for better quality
         translated_text = post_process_translation(translated_text.strip(), text)
@@ -241,7 +246,7 @@ def translate_segments(
     segments: list,
     source_lang: str = "tgl_Latn",
     target_lang: str = "eng_Latn",
-    model_name: str = "facebook/nllb-200-1.3B",
+    model_name: str = None,
     device: str = "auto",
     max_length: int = 512,
     num_beams: int = 5,
@@ -268,8 +273,8 @@ def translate_segments(
         return []
     
     try:
-        # Load model once for all segments
-        model, tokenizer, device_used = get_translator(model_name, device)
+        # Load CTranslate2 model once for all segments
+        translator, tokenizer, device_used = get_translator(model_name, device)
         tokenizer.src_lang = source_lang
         
         translated_segments = []
@@ -296,25 +301,21 @@ def translate_segments(
                     print(f"Preprocessing failed for segment, using original: {e}")
                     input_text = segment["text"]
             
-            # Tokenize and translate
-            encoded = tokenizer(
-                input_text, 
-                return_tensors="pt", 
-                padding=True, 
-                truncation=True, 
-                max_length=max_length
-            )
-            encoded = {k: v.to(device_used) for k, v in encoded.items()}
+            # Tokenize for CTranslate2 (expects list of tokens)
+            encoded = tokenizer.convert_ids_to_tokens(tokenizer.encode(input_text))
             
-            generated_tokens = model.generate(
-                **encoded,
-                forced_bos_token_id=tokenizer.lang_code_to_id[target_lang],
-                max_length=max_length,
-                num_beams=num_beams,
-                early_stopping=True
+            # Translate using CTranslate2
+            results = translator.translate_batch(
+                [encoded],
+                target_prefix=[[target_lang]],
+                max_batch_size=2048,
+                beam_size=num_beams,
+                max_decoding_length=max_length
             )
             
-            translated_text = tokenizer.batch_decode(generated_tokens, skip_special_tokens=True)[0]
+            # Decode translation
+            translated_tokens = results[0].hypotheses[0]
+            translated_text = tokenizer.decode(tokenizer.convert_tokens_to_ids(translated_tokens), skip_special_tokens=True)
             
             # Post-process translation
             translated_text = post_process_translation(translated_text.strip(), segment["text"])
@@ -341,7 +342,7 @@ def translate_segments(
 def auto_detect_and_translate(
     text: str,
     detected_lang: str,
-    model_name: str = "facebook/nllb-200-1.3B",
+    model_name: str = None,
     device: str = "auto",
     max_length: int = 512,
     num_beams: int = 5,

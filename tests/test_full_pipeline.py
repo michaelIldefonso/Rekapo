@@ -357,6 +357,8 @@ if __name__ == "__main__":
     
     choice = input(f"\n{Colors.CYAN}Choice (1 or 2):{Colors.ENDC} ").strip()
     
+                elif idx % 10 == 0:
+                    print_warning(f"Summary not generated: only {len(all_transcriptions)} segments so far (need 10)")
     if choice == "1":
         test_with_sample_audio()
     elif choice == "2":

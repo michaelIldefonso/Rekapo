@@ -1,56 +1,70 @@
-from transformers import pipeline
-import torch
+from transformers import AutoTokenizer
+import ctranslate2
+import sys
+from pathlib import Path
+
+# Add parent directory to path for config imports
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
+from config.config import SUMMARIZER_MODEL_PATH
 
 # Global summarizer cache
 _summarizer_cache = {}
 
-def get_summarizer(model_name: str = "facebook/bart-large-cnn", device: str = "auto"):
+def get_summarizer(model_name: str = None, device: str = "auto"):
     """
-    Loads the summarization model.
+    Loads the CTranslate2 summarization model.
     Uses caching to avoid reloading the same model.
     
     Args:
-        model_name: Model name or path (default: BART for summarization)
+        model_name: Model name or path (default: BART CT2 for summarization)
         device: "cpu", "cuda", or "auto" (auto-detects)
     
     Returns:
-        summarization pipeline
+        tuple: (translator, tokenizer, device)
     """
+    # Use configured model if no path specified
+    if model_name is None:
+        model_name = SUMMARIZER_MODEL_PATH
+    
     cache_key = f"{model_name}_{device}"
     
     if cache_key not in _summarizer_cache:
+        print(f"📦 Loading CTranslate2 summarization model: {model_name}")
         try:
             # Auto-detect device if not specified
             if device == "auto":
-                device = 0 if torch.cuda.is_available() else -1  # 0 for GPU, -1 for CPU
-            elif device == "cuda":
-                device = 0
-            else:
-                device = -1
+                device = "cuda" if ctranslate2.get_cuda_device_count() > 0 else "cpu"
             
-            # Load summarization pipeline
-            summarizer = pipeline(
-                "summarization",
-                model=model_name,
-                device=device
-            )
+            device_name = "GPU" if device == "cuda" else "CPU"
+            print(f"🖥️  Using device: {device_name}")
             
-            _summarizer_cache[cache_key] = summarizer
+            # Load tokenizer (from the CT2 model directory)
+            tokenizer = AutoTokenizer.from_pretrained(model_name)
+            
+            # Load CTranslate2 model
+            translator = ctranslate2.Translator(model_name, device=device)
+            
+            _summarizer_cache[cache_key] = (translator, tokenizer, device)
+            print(f"✅ CTranslate2 summarization model loaded and cached")
         except Exception as e:
+            print(f"❌ Failed to load summarization model: {e}")
             raise RuntimeError(f"Failed to load summarization model '{model_name}': {e}")
+    else:
+        print(f"♻️  Using cached summarization model: {model_name}")
     
     return _summarizer_cache[cache_key]
 
 def summarize_text(
     text: str,
-    model_name: str = "facebook/bart-large-cnn",
+    model_name: str = None,
     device: str = "auto",
     max_length: int = 150,
     min_length: int = 50,
-    do_sample: bool = False
+    beam_size: int = 4
 ) -> dict:
     """
-    Summarizes text using BART or other summarization models.
+    Summarizes text using BART CTranslate2 model.
     
     Args:
         text: Text to summarize
@@ -58,43 +72,58 @@ def summarize_text(
         device: "cpu", "cuda", or "auto"
         max_length: Maximum length of summary
         min_length: Minimum length of summary
-        do_sample: Whether to use sampling (False = deterministic)
+        beam_size: Number of beams for beam search
     
     Returns:
         dict with 'summary' and 'original_length'
     """
     if not text or not text.strip():
+        print("⚠️  summarize_text: Empty text provided")
         return {
             "summary": "",
             "original_length": 0
         }
     
     try:
-        # Load summarizer
-        summarizer = get_summarizer(model_name, device)
+        print(f"🔧 Loading/getting summarizer model: {model_name}")
+        # Load summarizer (CT2 translator and tokenizer)
+        translator, tokenizer, device_used = get_summarizer(model_name, device)
         
-        # Summarize
-        result = summarizer(
-            text,
-            max_length=max_length,
-            min_length=min_length,
-            do_sample=do_sample,
-            truncation=True
+        word_count = len(text.split())
+        print(f"📝 Summarizing {word_count} words (max={max_length}, min={min_length})...")
+        
+        # Tokenize input text
+        tokens = tokenizer.convert_ids_to_tokens(tokenizer.encode(text))
+        
+        # Generate summary using CTranslate2
+        results = translator.translate_batch(
+            [tokens],
+            beam_size=beam_size,
+            max_decoding_length=max_length,
+            min_decoding_length=min_length
         )
         
-        summary = result[0]["summary_text"]
+        # Decode the summary
+        summary_tokens = results[0].hypotheses[0]
+        summary = tokenizer.decode(
+            tokenizer.convert_tokens_to_ids(summary_tokens),
+            skip_special_tokens=True
+        )
+        
+        print(f"✅ summarize_text completed: {len(summary)} characters")
         
         return {
             "summary": summary.strip(),
-            "original_length": len(text.split())
+            "original_length": word_count
         }
     
     except Exception as e:
+        print(f"❌ Summarization failed in summarize_text: {e}")
         raise RuntimeError(f"Summarization failed: {e}")
 
 def summarize_transcriptions(
     transcriptions: list,
-    model_name: str = "facebook/bart-large-cnn",
+    model_name: str = None,
     device: str = "auto",
     max_length: int = 200,
     min_length: int = 50
@@ -112,7 +141,10 @@ def summarize_transcriptions(
     Returns:
         dict with 'summary', 'chunk_count', 'original_length'
     """
+    print(f"📝 summarize_transcriptions called with {len(transcriptions)} transcriptions")
+    
     if not transcriptions:
+        print("⚠️  No transcriptions to summarize (empty list)")
         return {
             "summary": "",
             "chunk_count": 0,
@@ -127,12 +159,17 @@ def summarize_transcriptions(
             if t.get("english_translation") or t.get("transcription")
         ])
         
+        print(f"📊 Combined text length: {len(combined_text)} characters, {len(combined_text.split())} words")
+        
         if not combined_text.strip():
+            print("⚠️  Combined text is empty after joining transcriptions")
             return {
                 "summary": "",
                 "chunk_count": len(transcriptions),
                 "original_length": 0
             }
+        
+        print(f"🤖 Calling BART summarizer (max_length={max_length}, min_length={min_length})...")
         
         # Summarize the combined text
         result = summarize_text(
@@ -143,6 +180,9 @@ def summarize_transcriptions(
             min_length=min_length
         )
         
+        print(f"✅ Summary generated: {len(result['summary'])} characters")
+        print(f"   Summary preview: {result['summary'][:150]}...")
+        
         return {
             "summary": result["summary"],
             "chunk_count": len(transcriptions),
@@ -150,11 +190,12 @@ def summarize_transcriptions(
         }
     
     except Exception as e:
+        print(f"❌ Transcription summarization failed: {e}")
         raise RuntimeError(f"Transcription summarization failed: {e}")
 
 def summarize_meeting_segments(
     segments: list,
-    model_name: str = "facebook/bart-large-cnn",
+    model_name: str = None,
     device: str = "auto",
     max_length: int = 200,
     min_length: int = 50

@@ -257,6 +257,9 @@ async def websocket_transcribe(websocket: WebSocket):
     """
     await manager.connect(websocket)
     
+    # Track session ID for this connection
+    current_session_id = None
+    
     try:
         connection_msg = {
             "status": "connected",
@@ -293,6 +296,19 @@ async def websocket_transcribe(websocket: WebSocket):
                 
                 session_id = message["session_id"]
                 client_segment_number = message.get("segment_number", None)
+                
+                # Initialize session in manager if first time seeing this session_id
+                if current_session_id is None:
+                    current_session_id = session_id
+                    # Initialize the session in manager to track segments
+                    if session_id not in manager.active_sessions:
+                        manager.active_sessions[session_id] = {
+                            "start_time": datetime.now(),
+                            "segment_count": 0,
+                            "connections": [websocket]
+                        }
+                        manager.session_transcriptions[session_id] = []
+                        print(f"{Colors.GREEN}📝 Initialized session {session_id} in manager{Colors.ENDC}")
                 
                 # For processing messages and file naming, we may need a temporary number
                 # The real segment_number will be assigned after validation
@@ -355,7 +371,7 @@ async def websocket_transcribe(websocket: WebSocket):
                 
                 # Transcribe with faster-whisper
                 language = message.get("language", None)  # Auto-detect Tagalog/English
-                model = message.get("model", "small")
+                model = message.get("model", None)  # None = use fine-tuned model from config
                 
                 # Get optional generation parameters for improved quality
                 temperature = message.get("temperature", 0.2)
@@ -519,11 +535,24 @@ async def websocket_transcribe(websocket: WebSocket):
                     "duration": result["duration"]
                 })
                 
+                # Get current session info for logging
+                current_segment_count = manager.active_sessions.get(session_id, {}).get("segment_count", 0)
+                total_transcriptions = len(manager.get_transcriptions(session_id))
+                
+                print(f"{Colors.BOLD}📊 Summarization Check [{session_id}]:{Colors.ENDC}")
+                print(f"  • Current segment: #{segment_number}")
+                print(f"  • Total segments in session: {current_segment_count}")
+                print(f"  • Transcriptions buffered: {total_transcriptions}")
+                print(f"  • Should summarize? (segment % 10 == 0): {current_segment_count % 10 == 0}")
+                
                 # Check if we should generate a summary (every 10 chunks)
                 if manager.should_summarize(session_id, chunk_threshold=10):
+                    print(f"{Colors.BLUE}{Colors.BOLD}🔄 TRIGGERING SUMMARIZATION for session {session_id} (segment {segment_number}){Colors.ENDC}")
                     try:
                         # Get all transcriptions for this session
                         transcriptions = manager.get_transcriptions(session_id)
+                        print(f"{Colors.CYAN}  • Fetched {len(transcriptions)} transcriptions{Colors.ENDC}")
+                        print(f"{Colors.CYAN}  • Summarizing last 10 chunks...{Colors.ENDC}")
                         
                         # Generate summary
                         summary_result = summarize_transcriptions(
@@ -532,6 +561,8 @@ async def websocket_transcribe(websocket: WebSocket):
                             max_length=200,
                             min_length=50
                         )
+                        
+                        print(f"{Colors.GREEN}  ✅ Summary generated: {summary_result['summary'][:100]}...{Colors.ENDC}")
                         
                         # Send summary to client
                         summary_msg = {
@@ -542,8 +573,18 @@ async def websocket_transcribe(websocket: WebSocket):
                             "chunk_count": summary_result["chunk_count"],
                             "is_summary": True
                         }
+                        
+                        print(f"{Colors.BLUE}{Colors.BOLD}📤 SENDING SUMMARY TO FRONTEND:{Colors.ENDC}")
+                        print(f"{Colors.CYAN}  • Session ID: {session_id}{Colors.ENDC}")
+                        print(f"{Colors.CYAN}  • Chunk Range: {segment_number-9} to {segment_number}{Colors.ENDC}")
+                        print(f"{Colors.CYAN}  • Summary Length: {len(summary_result['summary'])} chars{Colors.ENDC}")
+                        print(f"{Colors.CYAN}  • Full Summary: {summary_result['summary']}{Colors.ENDC}")
+                        print(f"{Colors.CYAN}  • WebSocket Connected: {websocket.client_state.name}{Colors.ENDC}")
+                        
                         log_to_mobile("summary", summary_msg, session_id)
                         await websocket.send_json(summary_msg)
+                        
+                        print(f"{Colors.GREEN}  ✅ Summary sent to frontend successfully{Colors.ENDC}")
                         
                         # Save summary to database
                         db_summary = SessionLocal()
@@ -556,14 +597,15 @@ async def websocket_transcribe(websocket: WebSocket):
                             )
                             db_summary.add(summary)
                             db_summary.commit()
+                            print(f"{Colors.GREEN}  ✅ Summary saved to database{Colors.ENDC}")
                         except Exception as e:
-                            print(f"Summary database save error: {e}")
+                            print(f"{Colors.RED}  ❌ Summary database save error: {e}{Colors.ENDC}")
                             db_summary.rollback()
                         finally:
                             db_summary.close()
                         
                     except Exception as e:
-                        print(f"Summarization error: {e}")
+                        print(f"{Colors.RED}❌ Summarization error: {e}{Colors.ENDC}")
                         error_msg = {
                             "status": "error",
                             "message": f"Summarization failed: {str(e)}",
@@ -571,6 +613,8 @@ async def websocket_transcribe(websocket: WebSocket):
                         }
                         log_to_mobile("error", error_msg)
                         await websocket.send_json(error_msg)
+                else:
+                    print(f"{Colors.YELLOW}  ⏭️  Skipping summarization (not at 10-segment boundary){Colors.ENDC}")
                 
                 # Database operations are now handled inline above
                 

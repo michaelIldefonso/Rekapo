@@ -4,6 +4,7 @@ fastapi
 uvicorn[standard]
 faster-whisper
 transformers
+ctranslate2
 accelerate
 bitsandbytes
 sentencepiece

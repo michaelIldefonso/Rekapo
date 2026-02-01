@@ -28,8 +28,10 @@ R2_PUBLIC_URL = os.getenv("R2_PUBLIC_URL", "")
 R2_PROFILE_PHOTOS_PREFIX = "profile_photos"
 R2_AUDIO_PREFIX = "audios"
 
-# Whisper Model Configuration
+# AI Model Paths
 WHISPER_MODEL_PATH = os.getenv("WHISPER_MODEL_PATH", "ai_models/whisper/models/whisper-small-fine-tuned-ct2")
+TRANSLATOR_MODEL_PATH = os.getenv("TRANSLATOR_MODEL_PATH", "ai_models/translator/nllb-1.3b-ct2")
+SUMMARIZER_MODEL_PATH = os.getenv("SUMMARIZER_MODEL_PATH", "ai_models/summarizer/bart-ct2")
 
 # Translation Configuration
 # Options: "nllb" (lighter, ~2.7GB) or "qwen" (heavier, ~8GB, better quality)

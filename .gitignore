@@ -96,6 +96,10 @@ audiios/
 # Whisper fine-tuned models
 ai_models/whisper/models/
 
+# CTranslate2 models (large binary files)
+ai_models/translator/nllb-1.3b-ct2/
+ai_models/summarizer/bart-ct2/
+
 # OS files
 .DS_Store
 Thumbs.db
