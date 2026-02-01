@@ -379,12 +379,22 @@ async def websocket_transcribe(websocket: WebSocket):
                 no_repeat_ngram_size = message.get("no_repeat_ngram_size", 3)
                 beam_size = message.get("beam_size", 5)  # Higher = more accurate but slower
                 
-                # Initial prompt for context (optional)
-                # Note: Fine-tuned models often work BETTER without prompts
-                # Test showed prompts can add unwanted text or have no effect
-                # Mobile can still send custom prompts if needed
+                # Build initial prompt from recent transcriptions for better context
+                # Whisper uses this to maintain consistency across chunks (names, terms, etc.)
                 initial_prompt = message.get("initial_prompt", None)
-                # No default prompt - fine-tuned model doesn't need it
+                if initial_prompt is None:
+                    # Get last 3 transcriptions for context
+                    recent_transcriptions = manager.get_recent_transcriptions(session_id, count=3)
+                    if recent_transcriptions:
+                        # Build prompt from recent text (keep it short - max ~224 tokens)
+                        context_texts = [t.get("transcription", "") for t in recent_transcriptions]
+                        initial_prompt = " ".join(context_texts)
+                        # Limit to ~200 characters to avoid token limit
+                        if len(initial_prompt) > 200:
+                            initial_prompt = initial_prompt[-200:]
+                        print(f"🔗 Using context from last {len(recent_transcriptions)} chunks: {initial_prompt[:80]}...")
+                    else:
+                        print(f"📝 First chunk - no context available yet")
                 
                 result = transcribe_audio_file(
                     str(audio_path),
@@ -434,6 +444,9 @@ async def websocket_transcribe(websocket: WebSocket):
                 # Only valid segments get official numbers
                 if client_segment_number is not None:
                     segment_number = client_segment_number
+                    # Update manager's counter to match client's segment number
+                    if session_id in manager.active_sessions:
+                        manager.active_sessions[session_id]["segment_count"] = segment_number
                 else:
                     segment_number = manager.increment_segment_count(session_id)
                 

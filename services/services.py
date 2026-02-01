@@ -121,6 +121,11 @@ class ConnectionManager:
         """Get all transcriptions for a session."""
         return self.session_transcriptions.get(session_id, [])
     
+    def get_recent_transcriptions(self, session_id: int, count: int = 3) -> list:
+        """Get the most recent N transcriptions for context."""
+        transcriptions = self.session_transcriptions.get(session_id, [])
+        return transcriptions[-count:] if transcriptions else []
+    
     def clear_transcriptions(self, session_id: int):
         """Clear transcriptions buffer for a session."""
         if session_id in self.session_transcriptions:
