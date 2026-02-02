@@ -23,7 +23,7 @@ router = APIRouter()
 manager = ConnectionManager()
 
 # Directory to store audio files (fallback for local storage)
-AUDIO_STORAGE_DIR = Path("audiios")
+AUDIO_STORAGE_DIR = Path("audio")
 AUDIO_STORAGE_DIR.mkdir(exist_ok=True)
 
 # ANSI color codes for terminal output
