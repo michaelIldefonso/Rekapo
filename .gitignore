@@ -116,3 +116,12 @@ node_modules/
 .tox/
 .nox/
 .coverage.*
+ai_models/summarizer/qwen2.5-3b-ct2/vocabulary.json
+ai_models/summarizer/qwen2.5-3b-ct2/vocab.json
+ai_models/summarizer/qwen2.5-3b-ct2/tokenizer.json
+ai_models/summarizer/qwen2.5-3b-ct2/tokenizer_config.json
+ai_models/summarizer/qwen2.5-3b-ct2/generation_config.json
+ai_models/summarizer/qwen2.5-3b-ct2/config.json
+ai_models/summarizer/qwen2.5-3b-ct2/gitattributes
+ai_models/summarizer/qwen2.5-3b-ct2/merges.txt
+ai_models/summarizer/qwen2.5-3b-ct2/README.md

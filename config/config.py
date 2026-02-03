@@ -31,7 +31,7 @@ R2_AUDIO_PREFIX = "audios"
 # AI Model Paths
 WHISPER_MODEL_PATH = os.getenv("WHISPER_MODEL_PATH", "ai_models/whisper/models/whisper-small-fine-tuned-ct2")
 TRANSLATOR_MODEL_PATH = os.getenv("TRANSLATOR_MODEL_PATH", "ai_models/translator/nllb-1.3b-ct2")
-SUMMARIZER_MODEL_PATH = os.getenv("SUMMARIZER_MODEL_PATH", "ai_models/summarizer/bart-ct2")
+SUMMARIZER_MODEL_PATH = os.getenv("SUMMARIZER_MODEL_PATH", "ai_models/summarizer/qwen2.5-3b-ct2")
 
 # Translation Configuration
 # Options: "nllb" (lighter, ~2.7GB) or "qwen" (heavier, ~8GB, better quality)

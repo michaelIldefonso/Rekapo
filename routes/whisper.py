@@ -18,6 +18,9 @@ from db.db import get_db, RecordingSegment, Summary, Session as DBSession, Sessi
 from schemas.schemas import AudioChunkMessage, TranscriptionResponse
 from config.config import R2_ENABLED, R2_AUDIO_PREFIX, TRANSLATION_MODEL, ENABLE_TAGLISH_PREPROCESSING
 from storage.storage import r2_client
+from utils.utils import get_logger
+
+logger = get_logger(__name__)
 
 router = APIRouter()
 manager = ConnectionManager()
@@ -567,12 +570,12 @@ async def websocket_transcribe(websocket: WebSocket):
                         print(f"{Colors.CYAN}  • Fetched {len(transcriptions)} transcriptions{Colors.ENDC}")
                         print(f"{Colors.CYAN}  • Summarizing last 10 chunks...{Colors.ENDC}")
                         
-                        # Generate summary
+                        # Generate summary with Qwen 2.5-3B
                         summary_result = summarize_transcriptions(
                             transcriptions=transcriptions[-10:],  # Last 10 chunks
                             device="cuda",  # GPU with CUDA 13.0
-                            max_length=200,
-                            min_length=50
+                            max_length=300,  # Longer for Qwen (better context)
+                            min_length=75
                         )
                         
                         print(f"{Colors.GREEN}  ✅ Summary generated: {summary_result['summary'][:100]}...{Colors.ENDC}")
@@ -648,7 +651,61 @@ async def websocket_transcribe(websocket: WebSocket):
     
     except WebSocketDisconnect:
         manager.disconnect(websocket)
-        print("Client disconnected from meeting recording")
+        print(f"{Colors.YELLOW}📱 Client disconnected from meeting recording{Colors.ENDC}")
+        
+        # Update session status if there was an active session
+        if current_session_id is not None:
+            db = SessionLocal()
+            try:
+                session = db.query(DBSession).filter(
+                    DBSession.id == current_session_id,
+                    DBSession.status == "recording"
+                ).first()
+                
+                if session:
+                    # Check if session has any segments
+                    segment_count = db.query(RecordingSegment).filter(
+                        RecordingSegment.session_id == current_session_id
+                    ).count()
+                    
+                    if segment_count > 0:
+                        # Session has content - mark as completed
+                        session.status = "completed"
+                        session.end_time = datetime.now()
+                        print(f"{Colors.GREEN}✅ Session {current_session_id} marked as 'completed' ({segment_count} segments recorded){Colors.ENDC}")
+                    else:
+                        # No segments recorded - mark as failed
+                        session.status = "failed"
+                        session.end_time = datetime.now()
+                        print(f"{Colors.RED}❌ Session {current_session_id} marked as 'failed' (no segments recorded){Colors.ENDC}")
+                    
+                    db.commit()
+                    logger.info(f"Session {current_session_id} auto-updated to '{session.status}' on disconnect ({segment_count} segments)")
+            except Exception as e:
+                print(f"{Colors.RED}❌ Failed to update session status on disconnect: {e}{Colors.ENDC}")
+                db.rollback()
+            finally:
+                db.close()
     except Exception as e:
-        print(f"WebSocket error: {e}")
+        print(f"{Colors.RED}WebSocket error: {e}{Colors.ENDC}")
         manager.disconnect(websocket)
+        
+        # Also update session status on unexpected errors
+        if current_session_id is not None:
+            db = SessionLocal()
+            try:
+                session = db.query(DBSession).filter(
+                    DBSession.id == current_session_id,
+                    DBSession.status == "recording"
+                ).first()
+                
+                if session:
+                    session.status = "failed"
+                    session.end_time = datetime.now()
+                    db.commit()
+                    print(f"{Colors.RED}❌ Session {current_session_id} marked as 'failed' due to error{Colors.ENDC}")
+            except Exception as db_error:
+                print(f"{Colors.RED}❌ Failed to update session on error: {db_error}{Colors.ENDC}")
+                db.rollback()
+            finally:
+                db.close()

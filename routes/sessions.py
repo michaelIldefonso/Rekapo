@@ -14,6 +14,7 @@ from schemas.schemas import (
     SessionSummaryResponse
 )
 from utils.utils import get_logger
+from ai_models.summarizer.inference import summarize_transcriptions
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -125,7 +126,7 @@ async def update_session(
     
     - **session_title**: Update the session title
     - **status**: Update status ("recording", "completed", "failed")
-    - **end_time**: Set the end time (automatically set to now if status changes to "completed")
+    - **end_time**: Set the end time (automatically set to now if status changes to "completed" or "failed")
     """
     session = db.query(DBSession).filter(
         DBSession.id == session_id,
@@ -303,3 +304,106 @@ async def get_session_details(
     logger.info(f"User {current_user.id} accessed details for session {session_id}")
     
     return SessionDetailResponse(**response_data)
+
+
+@router.post("/sessions/{session_id}/generate-summary")
+async def generate_full_session_summary(
+    session_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Generate a full session summary from ALL segments.
+    
+    This should be called when the session is marked as "completed".
+    Unlike the periodic 10-segment summaries, this creates a comprehensive
+    summary of the entire meeting by processing all recording segments.
+    
+    Returns the generated summary with metadata.
+    """
+    # Verify session exists and belongs to user
+    session = db.query(DBSession).filter(
+        DBSession.id == session_id,
+        DBSession.user_id == current_user.id,
+        DBSession.is_deleted == False
+    ).first()
+    
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session not found"
+        )
+    
+    try:
+        # Fetch all recording segments with translations
+        segments = db.query(RecordingSegment).filter(
+            RecordingSegment.session_id == session_id
+        ).order_by(RecordingSegment.segment_number).all()
+        
+        if not segments:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No segments found for this session"
+            )
+        
+        logger.info(f"Generating full session summary for session {session_id} with {len(segments)} segments")
+        
+        # Prepare transcriptions for summarization
+        transcriptions = [
+            {
+                "segment_number": seg.segment_number,
+                "transcription": seg.transcript_text,
+                "english_translation": seg.english_translation or seg.transcript_text
+            }
+            for seg in segments
+        ]
+        
+        # Generate comprehensive summary of ALL segments
+        summary_result = summarize_transcriptions(
+            transcriptions=transcriptions,
+            device="cuda",
+            max_length=400,  # Longer summary for full session
+            min_length=100
+        )
+        
+        # Save the full session summary to database
+        # Use special markers: chunk_range_start=0, chunk_range_end=-1 to indicate full session summary
+        full_summary = Summary(
+            session_id=session_id,
+            chunk_range_start=0,
+            chunk_range_end=len(segments),
+            summary_text=summary_result["summary"]
+        )
+        db.add(full_summary)
+        db.commit()
+        db.refresh(full_summary)
+        
+        logger.info(f"Full session summary generated and saved for session {session_id}")
+        
+        return {
+            "success": True,
+            "message": "Full session summary generated successfully",
+            "summary": {
+                "id": full_summary.id,
+                "session_id": session_id,
+                "chunk_range_start": 0,
+                "chunk_range_end": len(segments),
+                "summary_text": summary_result["summary"],
+                "generated_at": full_summary.generated_at,
+                "is_full_session_summary": True
+            },
+            "metadata": {
+                "total_segments": len(segments),
+                "original_length": summary_result["original_length"]
+            }
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error generating full session summary for session {session_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate session summary: {str(e)}"
+        )

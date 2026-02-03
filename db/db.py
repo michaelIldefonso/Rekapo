@@ -88,7 +88,7 @@ class Session(Base):
     is_deleted = Column(Boolean, default=False)
     deleted_at = Column(DateTime, nullable=True)
     deleted_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
-    status = Column(String(50), nullable=False, server_default=text("'recording'"), comment="Session status: recording, completed, or failed")
+    status = Column(String(50), nullable=False, server_default=text("'recording'"), comment="Session status: recording, completed (auto-set on disconnect), or failed")
     created_at = Column(DateTime, nullable=False, server_default=func.now())
     
     # Relationships

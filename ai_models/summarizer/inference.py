@@ -13,15 +13,15 @@ _summarizer_cache = {}
 
 def get_summarizer(model_name: str = None, device: str = "auto"):
     """
-    Loads the CTranslate2 summarization model.
+    Loads the CTranslate2 summarization model (Qwen 2.5-3B).
     Uses caching to avoid reloading the same model.
     
     Args:
-        model_name: Model name or path (default: BART CT2 for summarization)
+        model_name: Model name or path (default: Qwen 2.5-3B-CT2 for summarization)
         device: "cpu", "cuda", or "auto" (auto-detects)
     
     Returns:
-        tuple: (translator, tokenizer, device)
+        tuple: (generator, tokenizer, device)
     """
     # Use configured model if no path specified
     if model_name is None:
@@ -39,14 +39,14 @@ def get_summarizer(model_name: str = None, device: str = "auto"):
             device_name = "GPU" if device == "cuda" else "CPU"
             print(f"🖥️  Using device: {device_name}")
             
-            # Load tokenizer (from the CT2 model directory)
-            tokenizer = AutoTokenizer.from_pretrained(model_name)
+            # Load tokenizer
+            tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
             
-            # Load CTranslate2 model
-            translator = ctranslate2.Translator(model_name, device=device)
+            # Load CTranslate2 Generator (Qwen uses Generator, not Translator)
+            generator = ctranslate2.Generator(model_name, device=device)
             
-            _summarizer_cache[cache_key] = (translator, tokenizer, device)
-            print(f"✅ CTranslate2 summarization model loaded and cached")
+            _summarizer_cache[cache_key] = (generator, tokenizer, device)
+            print(f"✅ CTranslate2 Qwen summarization model loaded and cached")
         except Exception as e:
             print(f"❌ Failed to load summarization model: {e}")
             raise RuntimeError(f"Failed to load summarization model '{model_name}': {e}")
@@ -59,20 +59,20 @@ def summarize_text(
     text: str,
     model_name: str = None,
     device: str = "auto",
-    max_length: int = 150,
+    max_length: int = 300,
     min_length: int = 50,
-    beam_size: int = 4
+    beam_size: int = 1
 ) -> dict:
     """
-    Summarizes text using BART CTranslate2 model.
+    Summarizes text using Qwen 2.5-3B CTranslate2 model.
     
     Args:
         text: Text to summarize
         model_name: Model name or path
         device: "cpu", "cuda", or "auto"
         max_length: Maximum length of summary
-        min_length: Minimum length of summary
-        beam_size: Number of beams for beam search
+        min_length: Minimum length of summary (ignored with sampling)
+        beam_size: Number of beams (1 = sampling mode)
     
     Returns:
         dict with 'summary' and 'original_length'
@@ -86,29 +86,38 @@ def summarize_text(
     
     try:
         print(f"🔧 Loading/getting summarizer model: {model_name}")
-        # Load summarizer (CT2 translator and tokenizer)
-        translator, tokenizer, device_used = get_summarizer(model_name, device)
+        # Load summarizer (CT2 generator and tokenizer)
+        generator, tokenizer, device_used = get_summarizer(model_name, device)
         
         word_count = len(text.split())
-        print(f"📝 Summarizing {word_count} words (max={max_length}, min={min_length})...")
+        print(f"📝 Summarizing {word_count} words (max_tokens={max_length})...")
         
-        # Tokenize input text
-        tokens = tokenizer.convert_ids_to_tokens(tokenizer.encode(text))
+        # Build instruction prompt for Qwen
+        prompt = f"Summarize the following meeting transcript concisely and clearly:\n\n{text}\n\nSummary:"
         
-        # Generate summary using CTranslate2
-        results = translator.translate_batch(
+        # Tokenize input prompt
+        tokens = tokenizer.convert_ids_to_tokens(tokenizer.encode(prompt))
+        
+        # Generate summary using CTranslate2 Generator
+        results = generator.generate_batch(
             [tokens],
-            beam_size=beam_size,
-            max_decoding_length=max_length,
-            min_decoding_length=min_length
+            max_length=max_length,
+            sampling_temperature=0.7,
+            sampling_topk=40,
+            sampling_topp=0.9,
+            end_token=[tokenizer.eos_token_id] if hasattr(tokenizer, 'eos_token_id') else None
         )
         
         # Decode the summary
-        summary_tokens = results[0].hypotheses[0]
+        summary_tokens = results[0].sequences[0]
         summary = tokenizer.decode(
             tokenizer.convert_tokens_to_ids(summary_tokens),
             skip_special_tokens=True
         )
+        
+        # Remove the prompt from the output if present
+        if "Summary:" in summary:
+            summary = summary.split("Summary:")[-1].strip()
         
         print(f"✅ summarize_text completed: {len(summary)} characters")
         
@@ -125,18 +134,18 @@ def summarize_transcriptions(
     transcriptions: list,
     model_name: str = None,
     device: str = "auto",
-    max_length: int = 200,
-    min_length: int = 50
+    max_length: int = 300,
+    min_length: int = 75
 ) -> dict:
     """
-    Summarizes multiple transcription chunks into a coherent summary.
+    Summarizes multiple transcription chunks into a coherent summary using Qwen.
     
     Args:
         transcriptions: List of dicts with 'transcription' and 'english_translation'
         model_name: Model name or path
         device: "cpu", "cuda", or "auto"
-        max_length: Maximum length of summary
-        min_length: Minimum length of summary
+        max_length: Maximum length of summary (tokens)
+        min_length: Minimum length of summary (ignored with sampling)
     
     Returns:
         dict with 'summary', 'chunk_count', 'original_length'
@@ -197,18 +206,18 @@ def summarize_meeting_segments(
     segments: list,
     model_name: str = None,
     device: str = "auto",
-    max_length: int = 200,
-    min_length: int = 50
+    max_length: int = 300,
+    min_length: int = 75
 ) -> dict:
     """
-    Summarizes meeting segments with timestamps and speaker information.
+    Summarizes meeting segments with timestamps and speaker information using Qwen.
     
     Args:
         segments: List of segment dicts with timing and text info
         model_name: Model name or path
         device: "cpu", "cuda", or "auto"
-        max_length: Maximum length of summary
-        min_length: Minimum length of summary
+        max_length: Maximum length of summary (tokens)
+        min_length: Minimum length of summary (ignored with sampling)
     
     Returns:
         dict with 'summary', 'total_duration', 'segment_count'
