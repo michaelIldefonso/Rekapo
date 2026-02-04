@@ -18,9 +18,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from ai_models.whisper.inference import transcribe_audio_file
 from ai_models.translator.inference import translate_text
-from ai_models.llm.llm import translate_taglish_to_english
 from ai_models.summarizer.inference import summarize_transcriptions
-from config.config import TRANSLATION_MODEL, ENABLE_TAGLISH_PREPROCESSING
+from config.config import ENABLE_TAGLISH_PREPROCESSING
 
 # ANSI color codes for nice output
 class Colors:
@@ -62,34 +61,23 @@ def print_info(label, value, indent=2):
 
 def translate_to_english(text: str, detected_lang: str = "tl") -> str:
     """
-    Unified translation function matching whisper.py routing logic.
-    Routes to NLLB or Qwen based on config.
+    Translates Taglish/Tagalog text to English using NLLB-200.
     """
-    if TRANSLATION_MODEL == "qwen":
-        result = translate_taglish_to_english(
-            text=text,
-            device="cuda",
-            max_new_tokens=512
-        )
-        return result["translated_text"]
-    elif TRANSLATION_MODEL == "nllb":
-        # Map language codes
-        lang_map = {
-            "tl": "tgl_Latn",
-            "en": "eng_Latn",
-            "fil": "tgl_Latn"
-        }
-        source_lang = lang_map.get(detected_lang, "tgl_Latn")
-        
-        result = translate_text(
-            text=text,
-            source_lang=source_lang,
-            target_lang="eng_Latn",
-            device="cuda"
-        )
-        return result["translated_text"]
-    else:
-        return text
+    # Map language codes
+    lang_map = {
+        "tl": "tgl_Latn",
+        "en": "eng_Latn",
+        "fil": "tgl_Latn"
+    }
+    source_lang = lang_map.get(detected_lang, "tgl_Latn")
+    
+    result = translate_text(
+        text=text,
+        source_lang=source_lang,
+        target_lang="eng_Latn",
+        device="cuda"
+    )
+    return result["translated_text"]
 
 def is_valid_taglish_text(text: str) -> bool:
     """
@@ -111,7 +99,7 @@ def test_single_audio_file(audio_path: str, language: str = None):
     print_header("🎯 FULL PIPELINE TEST - SINGLE AUDIO FILE")
     
     print_info("Audio File", audio_path, indent=0)
-    print_info("Translation Model", TRANSLATION_MODEL.upper(), indent=0)
+    print_info("Translation Model", "NLLB-200", indent=0)
     print_info("Taglish Preprocessing", "ENABLED" if ENABLE_TAGLISH_PREPROCESSING else "DISABLED", indent=0)
     
     # STEP 1: Whisper Transcription
@@ -164,7 +152,7 @@ def test_single_audio_file(audio_path: str, language: str = None):
         result["language"] = "tl"
     
     # STEP 3: Translation to English
-    print_step(3, f"Translation to English ({TRANSLATION_MODEL.upper()})")
+    print_step(3, "Translation to English (NLLB-200)")
     
     try:
         english_translation = translate_to_english(
@@ -196,7 +184,7 @@ def test_multiple_segments_with_summarization(audio_files: list, language: str =
     print_header("🎯 FULL PIPELINE TEST - MULTIPLE SEGMENTS + SUMMARIZATION")
     
     print_info("Number of Audio Files", len(audio_files), indent=0)
-    print_info("Translation Model", TRANSLATION_MODEL.upper(), indent=0)
+    print_info("Translation Model", "NLLB-200", indent=0)
     print_info("Summarization", "Every 10 segments", indent=0)
     
     all_transcriptions = []

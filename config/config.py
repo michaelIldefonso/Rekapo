@@ -34,8 +34,5 @@ TRANSLATOR_MODEL_PATH = os.getenv("TRANSLATOR_MODEL_PATH", "ai_models/translator
 SUMMARIZER_MODEL_PATH = os.getenv("SUMMARIZER_MODEL_PATH", "Qwen/Qwen2.5-1.5B-Instruct")
 
 # Translation Configuration
-# Options: "nllb" (lighter, ~2.7GB) or "qwen" (heavier, ~8GB, better quality)
-TRANSLATION_MODEL = os.getenv("TRANSLATION_MODEL", "nllb").lower()
-
 # Preprocessing for Taglish (applies phonetic correction, dictionary lookup, context analysis)
 ENABLE_TAGLISH_PREPROCESSING = os.getenv("ENABLE_TAGLISH_PREPROCESSING", "true").lower() == "true"

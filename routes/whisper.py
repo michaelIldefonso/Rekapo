@@ -11,12 +11,11 @@ from contextlib import asynccontextmanager
 
 from ai_models.whisper.inference import transcribe_audio_file
 from ai_models.translator.inference import auto_detect_and_translate, translate_text
-from ai_models.llm.llm import translate_taglish_to_english
 from ai_models.summarizer.inference import summarize_transcriptions, clear_summarizer_cache
 from services.services import ConnectionManager
 from db.db import get_db, RecordingSegment, Summary, Session as DBSession, SessionLocal
 from schemas.schemas import AudioChunkMessage, TranscriptionResponse
-from config.config import R2_ENABLED, R2_AUDIO_PREFIX, TRANSLATION_MODEL, ENABLE_TAGLISH_PREPROCESSING
+from config.config import R2_ENABLED, R2_AUDIO_PREFIX, ENABLE_TAGLISH_PREPROCESSING
 from storage.storage import r2_client
 from utils.utils import get_logger
 
@@ -79,13 +78,13 @@ def log_to_mobile(message_type: str, data: dict, session_id: str = None):
         print(f"{Colors.RED}[{timestamp}] 📱 → MOBILE: Error - {error}{Colors.ENDC}")
 
 # Print active translation configuration
-print(f"🌐 Translation Model: {TRANSLATION_MODEL.upper()}")
+print(f"🌐 Translation Model: NLLB-200")
 print(f"📝 Taglish Preprocessing: {'ENABLED' if ENABLE_TAGLISH_PREPROCESSING else 'DISABLED'}")
 
 
 def translate_to_english(text: str, detected_lang: str = "tl") -> str:
     """
-    Unified translation function that routes to NLLB or Qwen based on config.
+    Translates Taglish/Tagalog text to English using NLLB-200.
     
     Args:
         text: Text to translate
@@ -94,38 +93,22 @@ def translate_to_english(text: str, detected_lang: str = "tl") -> str:
     Returns:
         Translated English text
     """
-    if TRANSLATION_MODEL == "qwen":
-        # Use Qwen LLM (heavier, better quality)
-        result = translate_taglish_to_english(
-            text=text,
-            device="cuda",
-            max_new_tokens=512
-        )
-        return result["translated_text"]
+    # Map Whisper language codes to NLLB codes
+    lang_map = {'tl': 'tgl_Latn', 'en': 'eng_Latn'}
+    source_lang = lang_map.get(detected_lang, 'tgl_Latn')
     
-    elif TRANSLATION_MODEL == "nllb":
-        # Use NLLB-200 (lighter, faster)
-        # Map Whisper language codes to NLLB codes
-        lang_map = {'tl': 'tgl_Latn', 'en': 'eng_Latn'}
-        source_lang = lang_map.get(detected_lang, 'tgl_Latn')
-        
-        # Skip translation if already English
-        if detected_lang == 'en':
-            return text
-        
-        result = translate_text(
-            text=text,
-            source_lang=source_lang,
-            target_lang="eng_Latn",
-            device="auto",
-            use_preprocessing=ENABLE_TAGLISH_PREPROCESSING
-        )
-        return result["translated_text"]
-    
-    else:
-        # Fallback: return original text
-        print(f"⚠️  Unknown translation model: {TRANSLATION_MODEL}")
+    # Skip translation if already English
+    if detected_lang == 'en':
         return text
+    
+    result = translate_text(
+        text=text,
+        source_lang=source_lang,
+        target_lang="eng_Latn",
+        device="auto",
+        use_preprocessing=ENABLE_TAGLISH_PREPROCESSING
+    )
+    return result["translated_text"]
 
 
 def is_valid_taglish_text(text: str) -> bool:

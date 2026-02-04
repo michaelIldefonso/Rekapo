@@ -187,9 +187,10 @@ The test respects your environment configuration:
 
 ```python
 # From config/config.py
-TRANSLATION_MODEL = "nllb"  # or "qwen"
 ENABLE_TAGLISH_PREPROCESSING = True
 ```
+
+Translation uses NLLB-200 model for Tagalog to English translation.
 
 ## Requirements
 
@@ -229,7 +230,6 @@ Processing time depends on:
 - Audio file length
 - Number of segments
 - GPU availability
-- Translation model choice (Qwen is slower)
 
 ## Troubleshooting
 
@@ -243,7 +243,7 @@ Processing time depends on:
 ```
 ❌ Translation failed: Model not loaded
 ```
-**Solution**: Check that NLLB or Qwen models are downloaded and configured
+**Solution**: Check that NLLB model is downloaded and configured in `ai_models/translator/`
 
 ### Out of memory
 ```
