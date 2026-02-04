@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, ConfigDict
 from typing import Optional, List
 from datetime import datetime
 
@@ -25,8 +25,7 @@ class UserResponse(UserBase):
     is_disabled: Optional[bool] = None
     created_at: datetime
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 # Session Schemas
 class CreateSessionRequest(BaseModel):
@@ -50,8 +49,7 @@ class SessionResponse(BaseModel):
     status: str
     created_at: datetime
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 # Recording Segment Schemas
 class RecordingSegmentCreate(BaseModel):
@@ -70,8 +68,7 @@ class RecordingSegmentResponse(BaseModel):
     english_translation: Optional[str] = None
     created_at: datetime
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 # Summary Schemas
 class SummaryCreate(BaseModel):
@@ -90,8 +87,7 @@ class SummaryResponse(BaseModel):
     is_final_summary: bool
     generated_at: datetime
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 # WebSocket Message Schemas
 class AudioChunkMessage(BaseModel):
@@ -145,8 +141,7 @@ class SessionRecordingSegmentResponse(BaseModel):
     english_translation: Optional[str] = None
     created_at: datetime
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class SessionSummaryResponse(BaseModel):
     id: int
@@ -156,8 +151,7 @@ class SessionSummaryResponse(BaseModel):
     is_final_summary: bool
     generated_at: datetime
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class SessionDetailResponse(BaseModel):
     # Session info
@@ -177,5 +171,4 @@ class SessionDetailResponse(BaseModel):
     total_segments: int = 0
     total_duration: Optional[float] = None
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

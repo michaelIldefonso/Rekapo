@@ -376,6 +376,60 @@ def generate_session_summary_logic(session_id: int):
             raise ValueError("No segments found for this session")
         
         segment_count = len(segments)
+        
+        # Check minimum thresholds before generating summary
+        # Calculate total content length
+        total_text = " ".join([seg.transcript_text or "" for seg in segments])
+        total_length = len(total_text.strip())
+        
+        # Minimum thresholds to justify loading heavy Qwen model
+        MIN_SEGMENTS = 5
+        MIN_TEXT_LENGTH = 200
+        
+        if segment_count < MIN_SEGMENTS or total_length < MIN_TEXT_LENGTH:
+            logger.info(f"Skipping final summary for session {session_id}: insufficient content (segments={segment_count}, length={total_length})")
+            # Create a simple concatenated summary instead of using AI
+            simple_summary = " ".join([
+                seg.english_translation or seg.transcript_text or ""
+                for seg in segments
+            ]).strip()
+            
+            if not simple_summary:
+                simple_summary = "Session too short to generate summary."
+            
+            # Save minimal summary to database
+            full_summary = Summary(
+                session_id=session_id,
+                chunk_range_start=1,
+                chunk_range_end=segment_count,
+                summary_text=simple_summary[:500],  # Limit to 500 chars
+                is_final_summary=True
+            )
+            db.add(full_summary)
+            db.commit()
+            db.refresh(full_summary)
+            
+            return {
+                "success": True,
+                "message": "Session too short for AI summary, using simple concatenation",
+                "summary": {
+                    "id": full_summary.id,
+                    "session_id": session_id,
+                    "chunk_range_start": full_summary.chunk_range_start,
+                    "chunk_range_end": full_summary.chunk_range_end,
+                    "summary_text": full_summary.summary_text,
+                    "generated_at": full_summary.generated_at,
+                    "is_final_summary": True
+                },
+                "metadata": {
+                    "total_segments": segment_count,
+                    "total_length": total_length,
+                    "summary_source": "simple_concatenation",
+                    "was_cached": False,
+                    "skipped_ai": True
+                }
+            }
+        
         logger.info(f"Generating final summary for session {session_id} with {segment_count} segments")
         
         # Smart branching: Direct from segments (<100) or from intermediate summaries (>=100)

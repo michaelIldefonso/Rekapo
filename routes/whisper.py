@@ -55,12 +55,15 @@ def log_to_mobile(message_type: str, data: dict, session_id: str = None):
         print(f"{Colors.CYAN}[{timestamp}] 📱 → MOBILE [{session_id}]: Processing segment...{Colors.ENDC}")
     
     elif message_type == "transcription":
+        raw = data.get('raw_whisper_output', '')[:60]
         text = data.get('transcription', '')[:60]
         translation = data.get('english_translation', '')[:60]
         lang = data.get('language', '')
         seg_num = data.get('segment_number', '')
         print(f"{Colors.GREEN}[{timestamp}] 📱 → MOBILE [{session_id}] Segment #{seg_num}:{Colors.ENDC}")
-        print(f"  {Colors.BOLD}Original ({lang}):{Colors.ENDC} {text}...")
+        print(f"  {Colors.BOLD}Raw Whisper ({lang}):{Colors.ENDC} {raw}...")
+        if raw != text:  # Only show preprocessed if it differs
+            print(f"  {Colors.BOLD}Preprocessed:{Colors.ENDC} {text}...")
         print(f"  {Colors.BOLD}Translation:{Colors.ENDC} {translation}...")
     
     elif message_type == "summary":
@@ -85,9 +88,10 @@ print(f"📝 Taglish Preprocessing: {'ENABLED' if ENABLE_TAGLISH_PREPROCESSING e
 def translate_to_english(text: str, detected_lang: str = "tl") -> str:
     """
     Translates Taglish/Tagalog text to English using NLLB-200.
+    Note: Preprocessing is now handled before this function is called.
     
     Args:
-        text: Text to translate
+        text: Preprocessed text to translate
         detected_lang: Detected language code ('tl', 'en', etc.)
     
     Returns:
@@ -106,7 +110,7 @@ def translate_to_english(text: str, detected_lang: str = "tl") -> str:
         source_lang=source_lang,
         target_lang="eng_Latn",
         device="auto",
-        use_preprocessing=ENABLE_TAGLISH_PREPROCESSING
+        use_preprocessing=False  # Already preprocessed
     )
     return result["translated_text"]
 
@@ -404,8 +408,11 @@ async def websocket_transcribe(websocket: WebSocket):
                 if result["language"] not in ["tl", "en"]:
                     result["language"] = "tl"  # Default to Tagalog for non-English
                 
+                # Store raw Whisper output for logging/debugging
+                raw_whisper_text = result["text"]
+                
                 # Check if transcription is empty (skip empty segments)
-                if not result["text"] or not result["text"].strip():
+                if not raw_whisper_text or not raw_whisper_text.strip():
                     print(f"Skipping empty segment for session {session_id}")
                     await cleanup_invalid_segment(temp_file_to_cleanup, audio_path, audio_path_str, session_id)
                     skip_msg = {
@@ -417,8 +424,22 @@ async def websocket_transcribe(websocket: WebSocket):
                     await websocket.send_json(skip_msg)
                     continue
                 
-                # Check if transcription contains non-Taglish characters
-                if not is_valid_taglish_text(result["text"]):
+                # Apply preprocessing to Whisper output (for Tagalog only)
+                preprocessed_text = raw_whisper_text
+                if result["language"] == "tl" and ENABLE_TAGLISH_PREPROCESSING:
+                    try:
+                        from ai_models.preprocessing import preprocess_taglish_text
+                        print(f"🔧 Applying Taglish preprocessing...")
+                        preprocessing_result = preprocess_taglish_text(raw_whisper_text)
+                        preprocessed_text = preprocessing_result["corrected_text"]
+                        print(f"  Raw: {raw_whisper_text[:80]}")
+                        print(f"  Preprocessed: {preprocessed_text[:80]}")
+                    except Exception as e:
+                        print(f"⚠️  Preprocessing failed, using raw text: {e}")
+                        preprocessed_text = raw_whisper_text
+                
+                # Check if transcription contains non-Taglish characters (use preprocessed text)
+                if not is_valid_taglish_text(preprocessed_text):
                     print(f"Skipping segment - contains non-Taglish characters")
                     await cleanup_invalid_segment(temp_file_to_cleanup, audio_path, audio_path_str, session_id)
                     skip_msg = {
@@ -470,7 +491,7 @@ async def websocket_transcribe(websocket: WebSocket):
                             print(f"Failed to rename local file: {e}")
                             # Keep using the temp_segment_id path if rename fails
                 
-                # Translate to English using configured model (NLLB or Qwen)
+                # Translate preprocessed text to English
                 try:
                     # Run translation in thread pool to not block event loop
                     import asyncio as async_io  # Import with alias to avoid closure issues
@@ -478,14 +499,14 @@ async def websocket_transcribe(websocket: WebSocket):
                     english_translation = await loop.run_in_executor(
                         None,
                         translate_to_english,
-                        result["text"],
+                        preprocessed_text,  # Use preprocessed text
                         result["language"]
                     )
                 except Exception as e:
                     print(f"Translation error: {e}")
                     import traceback
                     traceback.print_exc()
-                    english_translation = result["text"]
+                    english_translation = preprocessed_text
                 
                 # Send success response to user immediately
                 response = {
@@ -493,7 +514,8 @@ async def websocket_transcribe(websocket: WebSocket):
                     "message": "Transcription completed",
                     "session_id": session_id,
                     "segment_number": segment_number,
-                    "transcription": result["text"],
+                    "raw_whisper_output": raw_whisper_text,  # For debugging
+                    "transcription": preprocessed_text,  # Preprocessed text
                     "english_translation": english_translation,
                     "language": result["language"],
                     "language_probability": result["language_probability"],
@@ -511,7 +533,7 @@ async def websocket_transcribe(websocket: WebSocket):
                         session_id=session_id,
                         segment_number=segment_number,
                         audio_path=audio_path_str,
-                        transcript_text=result["text"],
+                        transcript_text=preprocessed_text,  # Store preprocessed text
                         english_translation=english_translation
                     )
                     db.add(recording_segment)
@@ -528,10 +550,10 @@ async def websocket_transcribe(websocket: WebSocket):
                         except Exception as e:
                             print(f"Failed to cleanup temp file: {e}")
                 
-                # Store transcription for summarization
+                # Store transcription for summarization (use preprocessed text)
                 manager.add_transcription(session_id, {
                     "segment_number": segment_number,
-                    "transcription": result["text"],
+                    "transcription": preprocessed_text,
                     "english_translation": english_translation,
                     "language": result["language"],
                     "duration": result["duration"]

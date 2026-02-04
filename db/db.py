@@ -13,8 +13,7 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, relationship
+from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 from datetime import datetime
 import os
 from dotenv import load_dotenv
@@ -118,7 +117,7 @@ class RecordingSegment(Base):
     session_id = Column(Integer, ForeignKey("sessions.id", ondelete="CASCADE"), nullable=False)
     segment_number = Column(Integer, nullable=False)
     audio_path = Column(String(500), nullable=False)
-    transcript_text = Column(Text, comment="Original transcription in Taglish")
+    transcript_text = Column(Text, comment="Preprocessed transcription after Whisper + phonetic correction + dictionary lookup")
     english_translation = Column(Text, comment="English translation of the transcript")
     created_at = Column(DateTime, nullable=False, server_default=func.now())
     
