@@ -47,9 +47,9 @@ def test_basic_summarization():
     try:
         result = summarize_text(
             text=sample_text,
-            device="cpu",  # Use CPU for testing
-            max_length=80,
-            min_length=30
+            device="cuda",  # Use GPU
+            max_length=300,
+            min_length=75
         )
         
         print(f"\n✅ Summarization Successful!")
@@ -67,7 +67,7 @@ def test_empty_text():
     print_test_header("Test 2: Empty Text Handling")
     
     try:
-        result = summarize_text(text="", device="cpu")
+        result = summarize_text(text="", device="cuda")
         
         if result["summary"] == "" and result["original_length"] == 0:
             print("✅ Empty text handled correctly")
@@ -122,9 +122,9 @@ def test_transcription_summarization():
     try:
         result = summarize_transcriptions(
             transcriptions=transcription_chunks,
-            device="cpu",
-            max_length=100,
-            min_length=20
+            device="cuda",
+            max_length=300,
+            min_length=75
         )
         
         print(f"\n✅ Transcription Summarization Successful!")
@@ -183,9 +183,9 @@ def test_meeting_segments_summarization():
     try:
         result = summarize_meeting_segments(
             segments=meeting_segments,
-            device="cpu",
-            max_length=100,
-            min_length=20
+            device="cuda",
+            max_length=300,
+            min_length=75
         )
         
         print(f"\n✅ Meeting Segment Summarization Successful!")
@@ -240,9 +240,9 @@ def test_long_text_summarization():
     try:
         result = summarize_text(
             text=long_text,
-            device="cpu",
-            max_length=150,
-            min_length=50
+            device="cuda",
+            max_length=400,
+            min_length=100
         )
         
         print(f"\n✅ Long Text Summarization Successful!")
@@ -262,18 +262,19 @@ def test_model_loading():
     
     try:
         print("🔄 Loading summarizer model (first time)...")
-        summarizer1 = get_summarizer(device="cpu")
+        generator1, tokenizer1, device1 = get_summarizer(device="cuda")
         print("✅ Model loaded successfully")
         
         print("\n🔄 Loading summarizer model again (should use cache)...")
-        summarizer2 = get_summarizer(device="cpu")
+        generator2, tokenizer2, device2 = get_summarizer(device="cuda")
         print("✅ Model retrieved from cache")
         
-        if summarizer1 is summarizer2:
-            print("\n✅ Caching works correctly (same object reference)")
+        # Check if the same generator object is returned (indicating caching works)
+        if generator1 is generator2:
+            print("\n✅ Caching works correctly (same generator object)")
             return True
         else:
-            print("\n⚠️  Warning: Different object references (caching might not be working)")
+            print("\n⚠️  Warning: Different generator objects (caching might not be working)")
             return False
     except Exception as e:
         print(f"\n❌ Model Loading Failed: {e}")
@@ -281,13 +282,16 @@ def test_model_loading():
 
 def run_all_tests():
     """Run all summarization tests"""
+    from config.config import SUMMARIZER_MODEL_PATH
+    
     print("\n")
     print("=" * 70)
     print("🧪 SUMMARIZATION TEST SUITE")
     print("=" * 70)
-    print("Testing BART-based summarization for meeting transcriptions")
-    print("Model: facebook/bart-large-cnn")
-    print("Device: CPU (for testing)")
+    print(f"Testing Qwen 2.5-1.5B Instruct for meeting transcription summarization")
+    print(f"Model: {SUMMARIZER_MODEL_PATH}")
+    print("Device: GPU (CUDA)")
+    print("=" * 70)
     
     tests = [
         ("Model Loading", test_model_loading),
@@ -327,7 +331,7 @@ def run_all_tests():
 
 if __name__ == "__main__":
     print("\n🚀 Starting Summarization Tests...")
-    print("⚠️  Note: This will download the BART model (~1.6GB) if not already cached")
+    print("⚠️  Note: This will download Qwen 2.5-1.5B (~3GB) if not already cached")
     print("⏱️  First run may take several minutes...\n")
     
     success = run_all_tests()

@@ -1,5 +1,5 @@
-from transformers import AutoTokenizer
-import ctranslate2
+from transformers import AutoTokenizer, AutoModelForCausalLM
+import torch
 import sys
 from pathlib import Path
 
@@ -11,17 +11,34 @@ from config.config import SUMMARIZER_MODEL_PATH
 # Global summarizer cache
 _summarizer_cache = {}
 
+def clear_summarizer_cache():
+    """
+    Clears the summarizer cache and frees GPU memory.
+    Call this after summarization to free memory for other models.
+    """
+    global _summarizer_cache
+    if _summarizer_cache:
+        print("🧹 Clearing Qwen summarizer cache...")
+        _summarizer_cache.clear()
+        
+        if torch.cuda.is_available():
+            import gc
+            gc.collect()
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+            print(f"   ✅ GPU memory freed")
+
 def get_summarizer(model_name: str = None, device: str = "auto"):
     """
-    Loads the CTranslate2 summarization model (Qwen 2.5-3B).
+    Loads the Qwen 2.5-1.5B summarization model from HuggingFace.
     Uses caching to avoid reloading the same model.
     
     Args:
-        model_name: Model name or path (default: Qwen 2.5-3B-CT2 for summarization)
+        model_name: Model name or path (default: Qwen/Qwen2.5-1.5B-Instruct)
         device: "cpu", "cuda", or "auto" (auto-detects)
     
     Returns:
-        tuple: (generator, tokenizer, device)
+        tuple: (model, tokenizer, device)
     """
     # Use configured model if no path specified
     if model_name is None:
@@ -30,23 +47,81 @@ def get_summarizer(model_name: str = None, device: str = "auto"):
     cache_key = f"{model_name}_{device}"
     
     if cache_key not in _summarizer_cache:
-        print(f"📦 Loading CTranslate2 summarization model: {model_name}")
+        print(f"📦 Loading Qwen summarization model: {model_name}")
         try:
             # Auto-detect device if not specified
             if device == "auto":
-                device = "cuda" if ctranslate2.get_cuda_device_count() > 0 else "cpu"
+                device = "cuda" if torch.cuda.is_available() else "cpu"
             
             device_name = "GPU" if device == "cuda" else "CPU"
             print(f"🖥️  Using device: {device_name}")
             
+            # Clear GPU memory before loading to prevent OOM
+            if device == "cuda":
+                import gc
+                print(f"🧹 Clearing GPU memory before loading Qwen...")
+                gc.collect()
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+                mem_allocated = torch.cuda.memory_allocated() / 1024**2
+                mem_reserved = torch.cuda.memory_reserved() / 1024**2
+                print(f"   💾 GPU Memory: {mem_allocated:.0f}MB allocated, {mem_reserved:.0f}MB reserved")
+            
             # Load tokenizer
             tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
             
-            # Load CTranslate2 Generator (Qwen uses Generator, not Translator)
-            generator = ctranslate2.Generator(model_name, device=device)
+            # Load model with optimizations
+            print(f"📥 Loading model with optimizations...")
             
-            _summarizer_cache[cache_key] = (generator, tokenizer, device)
-            print(f"✅ CTranslate2 Qwen summarization model loaded and cached")
+            if device == "cuda":
+                # GPU: Use 4-bit quantization for memory efficiency
+                try:
+                    from transformers import BitsAndBytesConfig
+                    
+                    quantization_config = BitsAndBytesConfig(
+                        load_in_4bit=True,
+                        bnb_4bit_compute_dtype=torch.float16,
+                        bnb_4bit_use_double_quant=True,
+                        bnb_4bit_quant_type="nf4"
+                    )
+                    
+                    model = AutoModelForCausalLM.from_pretrained(
+                        model_name,
+                        trust_remote_code=True,
+                        device_map="auto",
+                        quantization_config=quantization_config,
+                        torch_dtype=torch.float16,
+                        low_cpu_mem_usage=True
+                    )
+                    print(f"✨ Using 4-bit quantization (saves ~75% VRAM)")
+                except Exception as e:
+                    print(f"⚠️  4-bit quantization unavailable: {e}")
+                    print(f"   Loading in float16 instead...")
+                    model = AutoModelForCausalLM.from_pretrained(
+                        model_name,
+                        trust_remote_code=True,
+                        device_map="auto",
+                        torch_dtype=torch.float16,
+                        low_cpu_mem_usage=True
+                    )
+            else:
+                # CPU: Use float32
+                model = AutoModelForCausalLM.from_pretrained(
+                    model_name,
+                    trust_remote_code=True,
+                    device_map=device,
+                    torch_dtype=torch.float32,
+                    low_cpu_mem_usage=True
+                )
+            
+            model.eval()  # Set to evaluation mode
+            
+            # Enable gradient checkpointing for memory efficiency
+            if hasattr(model, 'gradient_checkpointing_enable'):
+                model.gradient_checkpointing_enable()
+            
+            _summarizer_cache[cache_key] = (model, tokenizer, device)
+            print(f"✅ Qwen summarization model loaded and cached")
         except Exception as e:
             print(f"❌ Failed to load summarization model: {e}")
             raise RuntimeError(f"Failed to load summarization model '{model_name}': {e}")
@@ -64,14 +139,14 @@ def summarize_text(
     beam_size: int = 1
 ) -> dict:
     """
-    Summarizes text using Qwen 2.5-3B CTranslate2 model.
+    Summarizes text using Qwen 2.5-1.5B model.
     
     Args:
         text: Text to summarize
         model_name: Model name or path
         device: "cpu", "cuda", or "auto"
         max_length: Maximum length of summary
-        min_length: Minimum length of summary (ignored with sampling)
+        min_length: Minimum length of summary
         beam_size: Number of beams (1 = sampling mode)
     
     Returns:
@@ -86,38 +161,61 @@ def summarize_text(
     
     try:
         print(f"🔧 Loading/getting summarizer model: {model_name}")
-        # Load summarizer (CT2 generator and tokenizer)
-        generator, tokenizer, device_used = get_summarizer(model_name, device)
+        # Load summarizer (model and tokenizer)
+        model, tokenizer, device_used = get_summarizer(model_name, device)
         
         word_count = len(text.split())
         print(f"📝 Summarizing {word_count} words (max_tokens={max_length})...")
         
-        # Build instruction prompt for Qwen
-        prompt = f"Summarize the following meeting transcript concisely and clearly:\n\n{text}\n\nSummary:"
+        # Build instruction prompt for Qwen using chat template
+        messages = [
+            {"role": "system", "content": "You are a helpful assistant that summarizes meeting transcripts concisely."},
+            {"role": "user", "content": f"Summarize the following meeting transcript in a clear and concise way:\n\n{text}"}
+        ]
         
-        # Tokenize input prompt
-        tokens = tokenizer.convert_ids_to_tokens(tokenizer.encode(prompt))
-        
-        # Generate summary using CTranslate2 Generator
-        results = generator.generate_batch(
-            [tokens],
-            max_length=max_length,
-            sampling_temperature=0.7,
-            sampling_topk=40,
-            sampling_topp=0.9,
-            end_token=[tokenizer.eos_token_id] if hasattr(tokenizer, 'eos_token_id') else None
+        # Apply chat template
+        prompt = tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=True
         )
         
-        # Decode the summary
-        summary_tokens = results[0].sequences[0]
-        summary = tokenizer.decode(
-            tokenizer.convert_tokens_to_ids(summary_tokens),
-            skip_special_tokens=True
-        )
+        # Tokenize input
+        inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
         
-        # Remove the prompt from the output if present
-        if "Summary:" in summary:
-            summary = summary.split("Summary:")[-1].strip()
+        # Generate summary with optimized settings
+        with torch.no_grad():
+            # Use torch.inference_mode for better performance
+            with torch.inference_mode():
+                outputs = model.generate(
+                    **inputs,
+                    max_new_tokens=max_length,
+                    min_new_tokens=min_length,
+                    do_sample=True,
+                    temperature=0.7,
+                    top_p=0.9,
+                    top_k=40,
+                    repetition_penalty=1.1,
+                    eos_token_id=tokenizer.eos_token_id,
+                    pad_token_id=tokenizer.pad_token_id if tokenizer.pad_token_id else tokenizer.eos_token_id,
+                    use_cache=True  # Enable KV cache for faster generation
+                )
+        
+        # Decode only the generated part (skip the input prompt)
+        generated_ids = outputs[0][inputs.input_ids.shape[1]:]
+        summary = tokenizer.decode(generated_ids, skip_special_tokens=True)
+        
+        # Clean up
+        summary = summary.strip()
+        
+        # Remove common unwanted patterns
+        unwanted_patterns = [
+            "Summary:", "Here is the summary:", "The summary is:",
+            "Transcript summary:", "Meeting summary:"
+        ]
+        for pattern in unwanted_patterns:
+            if summary.lower().startswith(pattern.lower()):
+                summary = summary[len(pattern):].strip()
         
         print(f"✅ summarize_text completed: {len(summary)} characters")
         
@@ -128,6 +226,8 @@ def summarize_text(
     
     except Exception as e:
         print(f"❌ Summarization failed in summarize_text: {e}")
+        import traceback
+        traceback.print_exc()
         raise RuntimeError(f"Summarization failed: {e}")
 
 def summarize_transcriptions(

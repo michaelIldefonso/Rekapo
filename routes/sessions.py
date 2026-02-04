@@ -14,7 +14,7 @@ from schemas.schemas import (
     SessionSummaryResponse
 )
 from utils.utils import get_logger
-from ai_models.summarizer.inference import summarize_transcriptions
+from ai_models.summarizer.inference import summarize_transcriptions, clear_summarizer_cache
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -407,3 +407,7 @@ async def generate_full_session_summary(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to generate session summary: {str(e)}"
         )
+    finally:
+        # Always clear Qwen cache after summarization to free GPU memory
+        logger.info("Clearing summarizer cache to free GPU memory...")
+        clear_summarizer_cache()

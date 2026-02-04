@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager
 from ai_models.whisper.inference import transcribe_audio_file
 from ai_models.translator.inference import auto_detect_and_translate, translate_text
 from ai_models.llm.llm import translate_taglish_to_english
-from ai_models.summarizer.inference import summarize_transcriptions
+from ai_models.summarizer.inference import summarize_transcriptions, clear_summarizer_cache
 from services.services import ConnectionManager
 from db.db import get_db, RecordingSegment, Summary, Session as DBSession, SessionLocal
 from schemas.schemas import AudioChunkMessage, TranscriptionResponse
@@ -24,6 +24,10 @@ logger = get_logger(__name__)
 
 router = APIRouter()
 manager = ConnectionManager()
+
+# GPU memory lock to prevent OOM from concurrent model loading
+# When summarization loads Qwen, transcription waits briefly
+gpu_memory_lock = asyncio.Lock()
 
 # Directory to store audio files (fallback for local storage)
 AUDIO_STORAGE_DIR = Path("audio")
@@ -564,71 +568,92 @@ async def websocket_transcribe(websocket: WebSocket):
                 # Check if we should generate a summary (every 10 chunks)
                 if manager.should_summarize(session_id, chunk_threshold=10):
                     print(f"{Colors.BLUE}{Colors.BOLD}🔄 TRIGGERING SUMMARIZATION for session {session_id} (segment {segment_number}){Colors.ENDC}")
-                    try:
-                        # Get all transcriptions for this session
-                        transcriptions = manager.get_transcriptions(session_id)
-                        print(f"{Colors.CYAN}  • Fetched {len(transcriptions)} transcriptions{Colors.ENDC}")
-                        print(f"{Colors.CYAN}  • Summarizing last 10 chunks...{Colors.ENDC}")
-                        
-                        # Generate summary with Qwen 2.5-3B
-                        summary_result = summarize_transcriptions(
-                            transcriptions=transcriptions[-10:],  # Last 10 chunks
-                            device="cuda",  # GPU with CUDA 13.0
-                            max_length=300,  # Longer for Qwen (better context)
-                            min_length=75
-                        )
-                        
-                        print(f"{Colors.GREEN}  ✅ Summary generated: {summary_result['summary'][:100]}...{Colors.ENDC}")
-                        
-                        # Send summary to client
-                        summary_msg = {
-                            "status": "summary",
-                            "message": f"Summary generated for chunks {segment_number-9} to {segment_number}",
-                            "session_id": session_id,
-                            "summary": summary_result["summary"],
-                            "chunk_count": summary_result["chunk_count"],
-                            "is_summary": True
-                        }
-                        
-                        print(f"{Colors.BLUE}{Colors.BOLD}📤 SENDING SUMMARY TO FRONTEND:{Colors.ENDC}")
-                        print(f"{Colors.CYAN}  • Session ID: {session_id}{Colors.ENDC}")
-                        print(f"{Colors.CYAN}  • Chunk Range: {segment_number-9} to {segment_number}{Colors.ENDC}")
-                        print(f"{Colors.CYAN}  • Summary Length: {len(summary_result['summary'])} chars{Colors.ENDC}")
-                        print(f"{Colors.CYAN}  • Full Summary: {summary_result['summary']}{Colors.ENDC}")
-                        print(f"{Colors.CYAN}  • WebSocket Connected: {websocket.client_state.name}{Colors.ENDC}")
-                        
-                        log_to_mobile("summary", summary_msg, session_id)
-                        await websocket.send_json(summary_msg)
-                        
-                        print(f"{Colors.GREEN}  ✅ Summary sent to frontend successfully{Colors.ENDC}")
-                        
-                        # Save summary to database
-                        db_summary = SessionLocal()
+                    
+                    # Run summarization in background to avoid blocking WebSocket
+                    async def run_summarization_background():
                         try:
-                            summary = Summary(
-                                session_id=session_id,
-                                chunk_range_start=segment_number - 9,
-                                chunk_range_end=segment_number,
-                                summary_text=summary_result["summary"]
-                            )
-                            db_summary.add(summary)
-                            db_summary.commit()
-                            print(f"{Colors.GREEN}  ✅ Summary saved to database{Colors.ENDC}")
+                            # Get all transcriptions for this session
+                            transcriptions = manager.get_transcriptions(session_id)
+                            print(f"{Colors.CYAN}  • Fetched {len(transcriptions)} transcriptions{Colors.ENDC}")
+                            print(f"{Colors.CYAN}  • Summarizing last 10 chunks in background...{Colors.ENDC}")
+                            
+                            # Run heavy summarization in thread pool to not block event loop
+                            import asyncio
+                            from concurrent.futures import ThreadPoolExecutor
+                            
+                            loop = asyncio.get_event_loop()
+                            with ThreadPoolExecutor() as executor:
+                                summary_result = await loop.run_in_executor(
+                                    executor,
+                                    lambda: summarize_transcriptions(
+                                        transcriptions=transcriptions[-10:],
+                                        device="cuda",
+                                        max_length=300,
+                                        min_length=75
+                                    )
+                                )
+                            
+                            print(f"{Colors.GREEN}  ✅ Summary generated: {summary_result['summary'][:100]}...{Colors.ENDC}")
+                            
+                            # Send summary to client
+                            summary_msg = {
+                                "status": "summary",
+                                "message": f"Summary generated for chunks {segment_number-9} to {segment_number}",
+                                "session_id": session_id,
+                                "summary": summary_result["summary"],
+                                "chunk_count": summary_result["chunk_count"],
+                                "is_summary": True
+                            }
+                            
+                            print(f"{Colors.BLUE}{Colors.BOLD}📤 SENDING SUMMARY TO FRONTEND:{Colors.ENDC}")
+                            print(f"{Colors.CYAN}  • Session ID: {session_id}{Colors.ENDC}")
+                            print(f"{Colors.CYAN}  • Chunk Range: {segment_number-9} to {segment_number}{Colors.ENDC}")
+                            print(f"{Colors.CYAN}  • Summary Length: {len(summary_result['summary'])} chars{Colors.ENDC}")
+                            print(f"{Colors.CYAN}  • Full Summary: {summary_result['summary']}{Colors.ENDC}")
+                            print(f"{Colors.CYAN}  • WebSocket Connected: {websocket.client_state.name}{Colors.ENDC}")
+                            
+                            log_to_mobile("summary", summary_msg, session_id)
+                            await websocket.send_json(summary_msg)
+                            
+                            print(f"{Colors.GREEN}  ✅ Summary sent to frontend successfully{Colors.ENDC}")
+                            
+                            # Save summary to database
+                            db_summary = SessionLocal()
+                            try:
+                                summary = Summary(
+                                    session_id=session_id,
+                                    chunk_range_start=segment_number - 9,
+                                    chunk_range_end=segment_number,
+                                    summary_text=summary_result["summary"]
+                                )
+                                db_summary.add(summary)
+                                db_summary.commit()
+                                print(f"{Colors.GREEN}  ✅ Summary saved to database{Colors.ENDC}")
+                            except Exception as e:
+                                print(f"{Colors.RED}  ❌ Summary database save error: {e}{Colors.ENDC}")
+                                db_summary.rollback()
+                            finally:
+                                db_summary.close()
+                            
                         except Exception as e:
-                            print(f"{Colors.RED}  ❌ Summary database save error: {e}{Colors.ENDC}")
-                            db_summary.rollback()
+                            print(f"{Colors.RED}❌ Summarization error: {e}{Colors.ENDC}")
+                            error_msg = {
+                                "status": "error",
+                                "message": f"Summarization failed: {str(e)}",
+                                "is_summary": True
+                            }
+                            log_to_mobile("error", error_msg)
+                            await websocket.send_json(error_msg)
                         finally:
-                            db_summary.close()
-                        
-                    except Exception as e:
-                        print(f"{Colors.RED}❌ Summarization error: {e}{Colors.ENDC}")
-                        error_msg = {
-                            "status": "error",
-                            "message": f"Summarization failed: {str(e)}",
-                            "is_summary": True
-                        }
-                        log_to_mobile("error", error_msg)
-                        await websocket.send_json(error_msg)
+                            # Always clear Qwen cache after summarization to free GPU memory
+                            print(f"{Colors.CYAN}🧹 Clearing summarizer cache to free GPU memory...{Colors.ENDC}")
+                            clear_summarizer_cache()
+                            print(f"{Colors.GREEN}  ✅ GPU memory freed for next cycle{Colors.ENDC}")
+                    
+                    # Fire and forget - don't wait for summarization
+                    import asyncio
+                    asyncio.create_task(run_summarization_background())
+                    print(f"{Colors.YELLOW}  ⚡ Summarization running in background (non-blocking){Colors.ENDC}")
                 else:
                     print(f"{Colors.YELLOW}  ⏭️  Skipping summarization (not at 10-segment boundary){Colors.ENDC}")
                 
@@ -658,29 +683,32 @@ async def websocket_transcribe(websocket: WebSocket):
             db = SessionLocal()
             try:
                 session = db.query(DBSession).filter(
-                    DBSession.id == current_session_id,
-                    DBSession.status == "recording"
+                    DBSession.id == current_session_id
                 ).first()
                 
                 if session:
-                    # Check if session has any segments
-                    segment_count = db.query(RecordingSegment).filter(
-                        RecordingSegment.session_id == current_session_id
-                    ).count()
-                    
-                    if segment_count > 0:
-                        # Session has content - mark as completed
-                        session.status = "completed"
-                        session.end_time = datetime.now()
-                        print(f"{Colors.GREEN}✅ Session {current_session_id} marked as 'completed' ({segment_count} segments recorded){Colors.ENDC}")
+                    # Only update if still active (not already completed/failed)
+                    if session.status in ["recording", "in_progress"]:
+                        # Check if session has any segments
+                        segment_count = db.query(RecordingSegment).filter(
+                            RecordingSegment.session_id == current_session_id
+                        ).count()
+                        
+                        if segment_count > 0:
+                            # Session has content - mark as completed
+                            session.status = "completed"
+                            session.end_time = datetime.now()
+                            print(f"{Colors.GREEN}✅ Session {current_session_id} marked as 'completed' ({segment_count} segments recorded){Colors.ENDC}")
+                        else:
+                            # No segments recorded - mark as failed
+                            session.status = "failed"
+                            session.end_time = datetime.now()
+                            print(f"{Colors.RED}❌ Session {current_session_id} marked as 'failed' (no segments recorded){Colors.ENDC}")
+                        
+                        db.commit()
+                        logger.info(f"Session {current_session_id} auto-updated to '{session.status}' on disconnect ({segment_count} segments)")
                     else:
-                        # No segments recorded - mark as failed
-                        session.status = "failed"
-                        session.end_time = datetime.now()
-                        print(f"{Colors.RED}❌ Session {current_session_id} marked as 'failed' (no segments recorded){Colors.ENDC}")
-                    
-                    db.commit()
-                    logger.info(f"Session {current_session_id} auto-updated to '{session.status}' on disconnect ({segment_count} segments)")
+                        print(f"{Colors.YELLOW}⚠️  Session {current_session_id} already in '{session.status}' status, skipping update{Colors.ENDC}")
             except Exception as e:
                 print(f"{Colors.RED}❌ Failed to update session status on disconnect: {e}{Colors.ENDC}")
                 db.rollback()
@@ -695,11 +723,10 @@ async def websocket_transcribe(websocket: WebSocket):
             db = SessionLocal()
             try:
                 session = db.query(DBSession).filter(
-                    DBSession.id == current_session_id,
-                    DBSession.status == "recording"
+                    DBSession.id == current_session_id
                 ).first()
                 
-                if session:
+                if session and session.status in ["recording", "in_progress"]:
                     session.status = "failed"
                     session.end_time = datetime.now()
                     db.commit()

@@ -125,3 +125,6 @@ ai_models/summarizer/qwen2.5-3b-ct2/config.json
 ai_models/summarizer/qwen2.5-3b-ct2/gitattributes
 ai_models/summarizer/qwen2.5-3b-ct2/merges.txt
 ai_models/summarizer/qwen2.5-3b-ct2/README.md
+tests/For testing.xlsx
+
+tests/audio_files
