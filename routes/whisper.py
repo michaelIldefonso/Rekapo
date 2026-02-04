@@ -701,33 +701,26 @@ async def websocket_transcribe(websocket: WebSocket):
                             db.commit()
                             print(f"{Colors.GREEN}✅ Session {current_session_id} marked as 'completed' ({segment_count} segments recorded){Colors.ENDC}")
                             
-                            # Generate final summary in background (non-blocking)
-                            async def generate_final_summary_background():
+                            # Generate final summary in background thread (connection already closing)
+                            def generate_final_summary_background():
                                 try:
                                     print(f"{Colors.CYAN}📝 Generating final summary for session {current_session_id}...{Colors.ENDC}")
                                     
                                     # Import here to avoid circular dependency
                                     from routes.sessions import generate_session_summary_logic
                                     
-                                    # Run in thread pool to not block
-                                    import asyncio
-                                    from concurrent.futures import ThreadPoolExecutor
-                                    
-                                    loop = asyncio.get_event_loop()
-                                    with ThreadPoolExecutor() as executor:
-                                        await loop.run_in_executor(
-                                            executor,
-                                            lambda: generate_session_summary_logic(current_session_id)
-                                        )
+                                    # Run directly in thread (no asyncio needed, connection is closing)
+                                    generate_session_summary_logic(current_session_id)
                                     
                                     print(f"{Colors.GREEN}✅ Final summary generated and saved for session {current_session_id}{Colors.ENDC}")
                                 except Exception as e:
                                     print(f"{Colors.RED}❌ Failed to generate final summary for session {current_session_id}: {e}{Colors.ENDC}")
                             
-                            # Fire and forget
-                            import asyncio
-                            asyncio.create_task(generate_final_summary_background())
-                            print(f"{Colors.YELLOW}⚡ Final summary generation triggered in background{Colors.ENDC}")
+                            # Run in daemon thread (survives WebSocket disconnect)
+                            import threading
+                            thread = threading.Thread(target=generate_final_summary_background, daemon=True)
+                            thread.start()
+                            print(f"{Colors.YELLOW}⚡ Final summary generation triggered in background thread{Colors.ENDC}")
                         else:
                             # No segments recorded - mark as failed
                             session.status = "failed"

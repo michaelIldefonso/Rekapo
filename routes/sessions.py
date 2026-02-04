@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends, status
+from fastapi import APIRouter, HTTPException, Depends, status, BackgroundTasks
 from sqlalchemy.orm import Session
 from datetime import datetime
 from typing import List
@@ -224,6 +224,7 @@ async def delete_session(
 @router.get("/sessions/{session_id}/details", response_model=SessionDetailResponse)
 async def get_session_details(
     session_id: int,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -288,30 +289,18 @@ async def get_session_details(
     if session.status == "completed" and not has_final_summary and len(recording_segments) > 0:
         logger.info(f"Session {session_id} completed but has no final summary - triggering generation")
         
-        # Generate final summary in background (non-blocking)
-        async def generate_missing_final_summary():
+        # Define background task function
+        def generate_summary_background():
             try:
-                from concurrent.futures import ThreadPoolExecutor
-                import asyncio as aio
-                
                 print(f"📝 Generating missing final summary for old session {session_id}...")
-                
-                # Run in thread pool to not block
-                loop = aio.get_event_loop()
-                with ThreadPoolExecutor() as executor:
-                    await loop.run_in_executor(
-                        executor,
-                        lambda: generate_session_summary_logic(session_id)
-                    )
-                
+                generate_session_summary_logic(session_id)
                 print(f"✅ Final summary generated for old session {session_id}")
             except Exception as e:
                 print(f"❌ Failed to generate final summary for session {session_id}: {e}")
         
-        # Fire and forget
-        import asyncio
-        asyncio.create_task(generate_missing_final_summary())
-        logger.info(f"⚡ Final summary generation triggered for old session {session_id}")
+        # Add to FastAPI background tasks (runs after response is sent)
+        background_tasks.add_task(generate_summary_background)
+        logger.info(f"⚡ Final summary generation queued for old session {session_id}")
     
     # Calculate total duration from segments (if available)
     total_duration = None
