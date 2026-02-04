@@ -138,6 +138,7 @@ class Summary(Base):
     chunk_range_start = Column(Integer, nullable=False)
     chunk_range_end = Column(Integer, nullable=False)
     summary_text = Column(Text, nullable=False)
+    is_final_summary = Column(Boolean, nullable=False, default=False)  # False = intermediate, True = final comprehensive
     generated_at = Column(DateTime, nullable=False, server_default=func.now())
     
     # Relationships

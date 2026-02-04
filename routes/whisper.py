@@ -624,7 +624,8 @@ async def websocket_transcribe(websocket: WebSocket):
                                     session_id=session_id,
                                     chunk_range_start=segment_number - 9,
                                     chunk_range_end=segment_number,
-                                    summary_text=summary_result["summary"]
+                                    summary_text=summary_result["summary"],
+                                    is_final_summary=False  # Intermediate summary (real-time)
                                 )
                                 db_summary.add(summary)
                                 db_summary.commit()
@@ -698,14 +699,43 @@ async def websocket_transcribe(websocket: WebSocket):
                             # Session has content - mark as completed
                             session.status = "completed"
                             session.end_time = datetime.now()
+                            db.commit()
                             print(f"{Colors.GREEN}✅ Session {current_session_id} marked as 'completed' ({segment_count} segments recorded){Colors.ENDC}")
+                            
+                            # Generate final summary in background (non-blocking)
+                            async def generate_final_summary_background():
+                                try:
+                                    print(f"{Colors.CYAN}📝 Generating final summary for session {current_session_id}...{Colors.ENDC}")
+                                    
+                                    # Import here to avoid circular dependency
+                                    from routes.sessions import generate_session_summary_logic
+                                    
+                                    # Run in thread pool to not block
+                                    import asyncio
+                                    from concurrent.futures import ThreadPoolExecutor
+                                    
+                                    loop = asyncio.get_event_loop()
+                                    with ThreadPoolExecutor() as executor:
+                                        await loop.run_in_executor(
+                                            executor,
+                                            lambda: generate_session_summary_logic(current_session_id)
+                                        )
+                                    
+                                    print(f"{Colors.GREEN}✅ Final summary generated and saved for session {current_session_id}{Colors.ENDC}")
+                                except Exception as e:
+                                    print(f"{Colors.RED}❌ Failed to generate final summary for session {current_session_id}: {e}{Colors.ENDC}")
+                            
+                            # Fire and forget
+                            import asyncio
+                            asyncio.create_task(generate_final_summary_background())
+                            print(f"{Colors.YELLOW}⚡ Final summary generation triggered in background{Colors.ENDC}")
                         else:
                             # No segments recorded - mark as failed
                             session.status = "failed"
                             session.end_time = datetime.now()
+                            db.commit()
                             print(f"{Colors.RED}❌ Session {current_session_id} marked as 'failed' (no segments recorded){Colors.ENDC}")
                         
-                        db.commit()
                         logger.info(f"Session {current_session_id} auto-updated to '{session.status}' on disconnect ({segment_count} segments)")
                     else:
                         print(f"{Colors.YELLOW}⚠️  Session {current_session_id} already in '{session.status}' status, skipping update{Colors.ENDC}")

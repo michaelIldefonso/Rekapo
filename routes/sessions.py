@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from datetime import datetime
 from typing import List
 
-from db.db import get_db, Session as DBSession, User, RecordingSegment, Summary
+from db.db import get_db, SessionLocal, Session as DBSession, User, RecordingSegment, Summary
 from routes.auth import get_current_user
 from schemas.schemas import (
     CreateSessionRequest,
@@ -272,8 +272,46 @@ async def get_session_details(
         Summary.session_id == session_id
     ).order_by(Summary.chunk_range_start).all()
     
+    # Fix summaries with missing generated_at and is_final_summary
+    for summary in summaries:
+        if summary.generated_at is None:
+            summary.generated_at = datetime.now()
+        # Fix missing is_final_summary for old summaries (set default for NULL values)
+        if summary.is_final_summary is None:
+            summary.is_final_summary = False  # Default old summaries to intermediate
+    
     # Commit any timestamp fixes
     db.commit()
+    
+    # Check if completed session needs a final summary (for old recordings)
+    has_final_summary = any(s.is_final_summary for s in summaries)
+    if session.status == "completed" and not has_final_summary and len(recording_segments) > 0:
+        logger.info(f"Session {session_id} completed but has no final summary - triggering generation")
+        
+        # Generate final summary in background (non-blocking)
+        async def generate_missing_final_summary():
+            try:
+                from concurrent.futures import ThreadPoolExecutor
+                import asyncio as aio
+                
+                print(f"📝 Generating missing final summary for old session {session_id}...")
+                
+                # Run in thread pool to not block
+                loop = aio.get_event_loop()
+                with ThreadPoolExecutor() as executor:
+                    await loop.run_in_executor(
+                        executor,
+                        lambda: generate_session_summary_logic(session_id)
+                    )
+                
+                print(f"✅ Final summary generated for old session {session_id}")
+            except Exception as e:
+                print(f"❌ Failed to generate final summary for session {session_id}: {e}")
+        
+        # Fire and forget
+        import asyncio
+        asyncio.create_task(generate_missing_final_summary())
+        logger.info(f"⚡ Final summary generation triggered for old session {session_id}")
     
     # Calculate total duration from segments (if available)
     total_duration = None
@@ -306,6 +344,157 @@ async def get_session_details(
     return SessionDetailResponse(**response_data)
 
 
+def generate_session_summary_logic(session_id: int):
+    """
+    Core logic to generate final session summary.
+    Can be called from API endpoint or background task.
+    
+    Returns dict with summary result or raises exception.
+    """
+    db = SessionLocal()
+    try:
+        # Check if final summary already exists
+        existing_final = db.query(Summary).filter(
+            Summary.session_id == session_id,
+            Summary.is_final_summary == True
+        ).first()
+        
+        if existing_final:
+            logger.info(f"Final summary already exists for session {session_id}, returning cached version")
+            return {
+                "success": True,
+                "message": "Final summary retrieved (cached)",
+                "summary": {
+                    "id": existing_final.id,
+                    "session_id": session_id,
+                    "chunk_range_start": existing_final.chunk_range_start,
+                    "chunk_range_end": existing_final.chunk_range_end,
+                    "summary_text": existing_final.summary_text,
+                    "generated_at": existing_final.generated_at,
+                    "is_final_summary": True
+                },
+                "metadata": {
+                    "was_cached": True
+                }
+            }
+        
+        # Fetch all recording segments
+        segments = db.query(RecordingSegment).filter(
+            RecordingSegment.session_id == session_id
+        ).order_by(RecordingSegment.segment_number).all()
+        
+        if not segments:
+            raise ValueError("No segments found for this session")
+        
+        segment_count = len(segments)
+        logger.info(f"Generating final summary for session {session_id} with {segment_count} segments")
+        
+        # Smart branching: Direct from segments (<100) or from intermediate summaries (>=100)
+        if segment_count < 100:
+            logger.info(f"Using direct summarization (segments < 100)")
+            # Prepare transcriptions for summarization
+            transcriptions = [
+                {
+                    "segment_number": seg.segment_number,
+                    "transcription": seg.transcript_text,
+                    "english_translation": seg.english_translation or seg.transcript_text
+                }
+                for seg in segments
+            ]
+            
+            # Generate comprehensive summary directly from ALL segments
+            summary_result = summarize_transcriptions(
+                transcriptions=transcriptions,
+                device="cuda",
+                max_length=500,  # Longer summary for full session
+                min_length=150
+            )
+            summary_source = "segments"
+        else:
+            logger.info(f"Using hierarchical summarization (segments >= 100, using intermediate summaries)")
+            # Get all intermediate summaries
+            intermediate_summaries = db.query(Summary).filter(
+                Summary.session_id == session_id,
+                Summary.is_final_summary == False
+            ).order_by(Summary.chunk_range_start).all()
+            
+            if not intermediate_summaries:
+                logger.warning(f"No intermediate summaries found for session {session_id}, falling back to direct summarization")
+                # Fallback: summarize segments directly (risky with >100 segments but better than nothing)
+                transcriptions = [
+                    {
+                        "segment_number": seg.segment_number,
+                        "transcription": seg.transcript_text,
+                        "english_translation": seg.english_translation or seg.transcript_text
+                    }
+                    for seg in segments
+                ]
+                summary_result = summarize_transcriptions(
+                    transcriptions=transcriptions,
+                    device="cuda",
+                    max_length=500,
+                    min_length=150
+                )
+                summary_source = "segments_fallback"
+            else:
+                # Prepare intermediate summaries as "transcriptions"
+                summary_transcriptions = [
+                    {
+                        "segment_number": f"{summ.chunk_range_start}-{summ.chunk_range_end}",
+                        "transcription": summ.summary_text,
+                        "english_translation": summ.summary_text
+                    }
+                    for summ in intermediate_summaries
+                ]
+                
+                # Generate final comprehensive summary from intermediate summaries
+                summary_result = summarize_transcriptions(
+                    transcriptions=summary_transcriptions,
+                    device="cuda",
+                    max_length=600,  # Longer for hierarchical summary
+                    min_length=200
+                )
+                summary_source = f"intermediates ({len(intermediate_summaries)} summaries)"
+        
+        # Save the final summary to database
+        full_summary = Summary(
+            session_id=session_id,
+            chunk_range_start=1,  # First segment
+            chunk_range_end=segment_count,  # Last segment
+            summary_text=summary_result["summary"],
+            is_final_summary=True  # Mark as final comprehensive summary
+        )
+        db.add(full_summary)
+        db.commit()
+        db.refresh(full_summary)
+        
+        logger.info(f"Final summary generated and saved for session {session_id} (source: {summary_source})")
+        
+        return {
+            "success": True,
+            "message": "Final session summary generated successfully",
+            "summary": {
+                "id": full_summary.id,
+                "session_id": session_id,
+                "chunk_range_start": full_summary.chunk_range_start,
+                "chunk_range_end": full_summary.chunk_range_end,
+                "summary_text": summary_result["summary"],
+                "generated_at": full_summary.generated_at,
+                "is_final_summary": True
+            },
+            "metadata": {
+                "total_segments": segment_count,
+                "original_length": summary_result["original_length"],
+                "summary_source": summary_source,
+                "was_cached": False
+            }
+        }
+    finally:
+        # Always clear Qwen cache and close DB
+        clear_summarizer_cache()
+        db.close()
+
+
 @router.post("/sessions/{session_id}/generate-summary")
 async def generate_full_session_summary(
     session_id: int,
@@ -335,79 +524,22 @@ async def generate_full_session_summary(
         )
     
     try:
-        # Fetch all recording segments with translations
-        segments = db.query(RecordingSegment).filter(
-            RecordingSegment.session_id == session_id
-        ).order_by(RecordingSegment.segment_number).all()
-        
-        if not segments:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="No segments found for this session"
-            )
-        
-        logger.info(f"Generating full session summary for session {session_id} with {len(segments)} segments")
-        
-        # Prepare transcriptions for summarization
-        transcriptions = [
-            {
-                "segment_number": seg.segment_number,
-                "transcription": seg.transcript_text,
-                "english_translation": seg.english_translation or seg.transcript_text
-            }
-            for seg in segments
-        ]
-        
-        # Generate comprehensive summary of ALL segments
-        summary_result = summarize_transcriptions(
-            transcriptions=transcriptions,
-            device="cuda",
-            max_length=400,  # Longer summary for full session
-            min_length=100
-        )
-        
-        # Save the full session summary to database
-        # Use special markers: chunk_range_start=0, chunk_range_end=-1 to indicate full session summary
-        full_summary = Summary(
-            session_id=session_id,
-            chunk_range_start=0,
-            chunk_range_end=len(segments),
-            summary_text=summary_result["summary"]
-        )
-        db.add(full_summary)
-        db.commit()
-        db.refresh(full_summary)
-        
-        logger.info(f"Full session summary generated and saved for session {session_id}")
-        
-        return {
-            "success": True,
-            "message": "Full session summary generated successfully",
-            "summary": {
-                "id": full_summary.id,
-                "session_id": session_id,
-                "chunk_range_start": 0,
-                "chunk_range_end": len(segments),
-                "summary_text": summary_result["summary"],
-                "generated_at": full_summary.generated_at,
-                "is_full_session_summary": True
-            },
-            "metadata": {
-                "total_segments": len(segments),
-                "original_length": summary_result["original_length"]
-            }
-        }
+        # Call the core logic function
+        result = generate_session_summary_logic(session_id)
+        return result
     
+    except ValueError as e:
+        # No segments found
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
     except HTTPException:
         raise
     except Exception as e:
-        db.rollback()
         logger.error(f"Error generating full session summary for session {session_id}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to generate session summary: {str(e)}"
         )
-    finally:
-        # Always clear Qwen cache after summarization to free GPU memory
-        logger.info("Clearing summarizer cache to free GPU memory...")
-        clear_summarizer_cache()
+

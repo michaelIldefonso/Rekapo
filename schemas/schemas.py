@@ -79,6 +79,7 @@ class SummaryCreate(BaseModel):
     chunk_range_start: int
     chunk_range_end: int
     summary_text: str
+    is_final_summary: bool = False
 
 class SummaryResponse(BaseModel):
     id: int
@@ -86,6 +87,7 @@ class SummaryResponse(BaseModel):
     chunk_range_start: int
     chunk_range_end: int
     summary_text: str
+    is_final_summary: bool
     generated_at: datetime
     
     class Config:
@@ -151,6 +153,7 @@ class SessionSummaryResponse(BaseModel):
     chunk_range_start: int
     chunk_range_end: int
     summary_text: str
+    is_final_summary: bool
     generated_at: datetime
     
     class Config:
