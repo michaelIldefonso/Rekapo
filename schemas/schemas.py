@@ -58,6 +58,7 @@ class RecordingSegmentCreate(BaseModel):
     audio_path: str
     transcript_text: Optional[str] = None
     english_translation: Optional[str] = None
+    rating: Optional[int] = Field(None, ge=1, le=5, description="Rating 1-5")
 
 class RecordingSegmentResponse(BaseModel):
     id: int
@@ -66,9 +67,19 @@ class RecordingSegmentResponse(BaseModel):
     audio_path: str
     transcript_text: Optional[str] = None
     english_translation: Optional[str] = None
+    rating: Optional[int] = None
     created_at: datetime
     
     model_config = ConfigDict(from_attributes=True)
+
+class RateSegmentRequest(BaseModel):
+    rating: int = Field(..., ge=1, le=5, description="Rating from 1 to 5")
+
+class RateSegmentResponse(BaseModel):
+    success: bool
+    message: str
+    segment_id: int
+    rating: int
 
 # Summary Schemas
 class SummaryCreate(BaseModel):
@@ -139,6 +150,7 @@ class SessionRecordingSegmentResponse(BaseModel):
     audio_path: str
     transcript_text: Optional[str] = None
     english_translation: Optional[str] = None
+    rating: Optional[int] = None
     created_at: datetime
     
     model_config = ConfigDict(from_attributes=True)

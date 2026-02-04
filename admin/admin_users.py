@@ -6,7 +6,7 @@ from typing import Optional
 from db.db import get_db, User
 from utils.utils import get_logger, mask_email, safe_user_log_dict
 from schemas.schemas import UserResponse
-from admin.schemas import UserListResponse, DisableUserRequest, UpdateAdminStatusRequest
+from admin.schemas import UserListResponse, DisableUserRequest, UpdateAdminStatusRequest, UserAnalyticsResponse
 from admin.utils import get_current_admin, validate_user_operation
 from admin.services import AdminUserService
 
@@ -199,6 +199,35 @@ async def update_admin_status(
                 action, user.id, mask_email(user.email))
     
     return UserResponse.model_validate(user)
+
+
+@router.get("/admin/users/{user_id}/analytics", response_model=UserAnalyticsResponse)
+async def get_user_analytics(
+    user_id: int,
+    current_admin: User = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Get comprehensive analytics and statistics for a specific user.
+    Includes session counts, duration statistics, segments, and activity metrics.
+    Admin access required.
+    """
+    logger.info("=== Admin viewing user analytics - Admin ID: %s, User ID: %s ===", 
+                current_admin.id, user_id)
+    
+    analytics = AdminUserService.get_user_analytics(db, user_id)
+    
+    if not analytics:
+        logger.warning("User not found: %s", user_id)
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    logger.info("✓ Retrieved analytics for user: %s (Sessions: %s, Segments: %s)", 
+                user_id, analytics['total_sessions'], analytics['total_recording_segments'])
+    
+    return UserAnalyticsResponse(**analytics)
 
 
 @router.delete("/admin/users/{user_id}")

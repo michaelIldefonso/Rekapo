@@ -11,7 +11,9 @@ from schemas.schemas import (
     SessionUpdate,
     SessionDetailResponse,
     SessionRecordingSegmentResponse,
-    SessionSummaryResponse
+    SessionSummaryResponse,
+    RateSegmentRequest,
+    RateSegmentResponse
 )
 from utils.utils import get_logger
 from ai_models.summarizer.inference import summarize_transcriptions, clear_summarizer_cache
@@ -331,6 +333,62 @@ async def get_session_details(
     logger.info(f"User {current_user.id} accessed details for session {session_id}")
     
     return SessionDetailResponse(**response_data)
+
+
+@router.patch("/sessions/{session_id}/segments/{segment_id}/rate", response_model=RateSegmentResponse)
+async def rate_segment(
+    session_id: int,
+    segment_id: int,
+    request: RateSegmentRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Rate a recording segment for transcription quality.
+    
+    - **session_id**: The session ID that contains the segment
+    - **segment_id**: The segment ID to rate
+    - **rating**: Quality rating from 1 (poor) to 5 (excellent)
+    
+    Users can only rate segments from their own sessions.
+    """
+    # Verify session exists and belongs to user
+    session = db.query(DBSession).filter(
+        DBSession.id == session_id,
+        DBSession.user_id == current_user.id,
+        DBSession.is_deleted == False
+    ).first()
+    
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session not found"
+        )
+    
+    # Fetch the segment
+    segment = db.query(RecordingSegment).filter(
+        RecordingSegment.id == segment_id,
+        RecordingSegment.session_id == session_id
+    ).first()
+    
+    if not segment:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Segment not found"
+        )
+    
+    # Update the rating
+    segment.rating = request.rating
+    db.commit()
+    
+    logger.info(f"User {current_user.id} rated segment {segment_id} (session {session_id}) with {request.rating} stars")
+    
+    return RateSegmentResponse(
+        success=True,
+        message=f"Segment rated successfully",
+        segment_id=segment_id,
+        rating=request.rating
+    )
 
 
 def generate_session_summary_logic(session_id: int):

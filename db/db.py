@@ -119,6 +119,7 @@ class RecordingSegment(Base):
     audio_path = Column(String(500), nullable=False)
     transcript_text = Column(Text, comment="Preprocessed transcription after Whisper + phonetic correction + dictionary lookup")
     english_translation = Column(Text, comment="English translation of the transcript")
+    rating = Column(Integer, nullable=True, comment="User rating for transcription quality (1-5 scale)")
     created_at = Column(DateTime, nullable=False, server_default=func.now())
     
     # Relationships
