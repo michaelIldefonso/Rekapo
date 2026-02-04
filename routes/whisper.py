@@ -488,22 +488,21 @@ async def websocket_transcribe(websocket: WebSocket):
                             # Keep using the temp_segment_id path if rename fails
                 
                 # Translate to English using configured model (NLLB or Qwen)
-                async def translate_async():
-                    try:
-                        # Run translation in thread pool to not block event loop
-                        loop = asyncio.get_event_loop()
-                        english_text = await loop.run_in_executor(
-                            None,
-                            translate_to_english,
-                            result["text"],
-                            result["language"]
-                        )
-                        return english_text
-                    except Exception as e:
-                        print(f"Translation error: {e}")
-                        return result["text"]
-                
-                english_translation = await translate_async()
+                try:
+                    # Run translation in thread pool to not block event loop
+                    import asyncio as async_io  # Import with alias to avoid closure issues
+                    loop = async_io.get_event_loop()
+                    english_translation = await loop.run_in_executor(
+                        None,
+                        translate_to_english,
+                        result["text"],
+                        result["language"]
+                    )
+                except Exception as e:
+                    print(f"Translation error: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    english_translation = result["text"]
                 
                 # Send success response to user immediately
                 response = {

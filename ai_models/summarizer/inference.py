@@ -18,7 +18,7 @@ def clear_summarizer_cache():
     """
     global _summarizer_cache
     if _summarizer_cache:
-        print("🧹 Clearing Qwen summarizer cache...")
+        print("🧹 Clearing summarizer cache...")
         _summarizer_cache.clear()
         
         if torch.cuda.is_available():
@@ -30,11 +30,11 @@ def clear_summarizer_cache():
 
 def get_summarizer(model_name: str = None, device: str = "auto"):
     """
-    Loads the Qwen 2.5-1.5B summarization model from HuggingFace.
+    Loads the summarization model from HuggingFace.
     Uses caching to avoid reloading the same model.
     
     Args:
-        model_name: Model name or path (default: Qwen/Qwen2.5-1.5B-Instruct)
+        model_name: Model name or path (default from config: Qwen/Qwen2.5-1.5B-Instruct)
         device: "cpu", "cuda", or "auto" (auto-detects)
     
     Returns:
@@ -47,7 +47,7 @@ def get_summarizer(model_name: str = None, device: str = "auto"):
     cache_key = f"{model_name}_{device}"
     
     if cache_key not in _summarizer_cache:
-        print(f"📦 Loading Qwen summarization model: {model_name}")
+        print(f"📦 Loading summarization model: {model_name}")
         try:
             # Auto-detect device if not specified
             if device == "auto":
@@ -59,7 +59,7 @@ def get_summarizer(model_name: str = None, device: str = "auto"):
             # Clear GPU memory before loading to prevent OOM
             if device == "cuda":
                 import gc
-                print(f"🧹 Clearing GPU memory before loading Qwen...")
+                print(f"🧹 Clearing GPU memory before loading model...")
                 gc.collect()
                 torch.cuda.empty_cache()
                 torch.cuda.synchronize()
@@ -121,11 +121,12 @@ def get_summarizer(model_name: str = None, device: str = "auto"):
                 model.gradient_checkpointing_enable()
             
             _summarizer_cache[cache_key] = (model, tokenizer, device)
-            print(f"✅ Qwen summarization model loaded and cached")
+            print(f"✅ Summarization model loaded and cached")
         except Exception as e:
             print(f"❌ Failed to load summarization model: {e}")
             raise RuntimeError(f"Failed to load summarization model '{model_name}': {e}")
     else:
+        model, tokenizer, device = _summarizer_cache[cache_key]
         print(f"♻️  Using cached summarization model: {model_name}")
     
     return _summarizer_cache[cache_key]
@@ -139,11 +140,11 @@ def summarize_text(
     beam_size: int = 1
 ) -> dict:
     """
-    Summarizes text using Qwen 2.5-1.5B model.
+    Summarizes text using an instruction-tuned LLM (default: Qwen2.5-1.5B).
     
     Args:
         text: Text to summarize
-        model_name: Model name or path
+        model_name: Model name or path (default from config)
         device: "cpu", "cuda", or "auto"
         max_length: Maximum length of summary
         min_length: Minimum length of summary
@@ -238,11 +239,11 @@ def summarize_transcriptions(
     min_length: int = 75
 ) -> dict:
     """
-    Summarizes multiple transcription chunks into a coherent summary using Qwen.
+    Summarizes multiple transcription chunks into a coherent summary.
     
     Args:
         transcriptions: List of dicts with 'transcription' and 'english_translation'
-        model_name: Model name or path
+        model_name: Model name or path (default from config)
         device: "cpu", "cuda", or "auto"
         max_length: Maximum length of summary (tokens)
         min_length: Minimum length of summary (ignored with sampling)
@@ -278,7 +279,7 @@ def summarize_transcriptions(
                 "original_length": 0
             }
         
-        print(f"🤖 Calling BART summarizer (max_length={max_length}, min_length={min_length})...")
+        print(f"🤖 Calling summarizer model (max_length={max_length}, min_length={min_length})...")
         
         # Summarize the combined text
         result = summarize_text(
@@ -310,11 +311,11 @@ def summarize_meeting_segments(
     min_length: int = 75
 ) -> dict:
     """
-    Summarizes meeting segments with timestamps and speaker information using Qwen.
+    Summarizes meeting segments with timestamps and speaker information.
     
     Args:
         segments: List of segment dicts with timing and text info
-        model_name: Model name or path
+        model_name: Model name or path (default from config)
         device: "cpu", "cuda", or "auto"
         max_length: Maximum length of summary (tokens)
         min_length: Minimum length of summary (ignored with sampling)
