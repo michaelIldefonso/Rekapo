@@ -533,7 +533,8 @@ async def websocket_transcribe(websocket: WebSocket):
                         session_id=session_id,
                         segment_number=segment_number,
                         audio_path=audio_path_str,
-                        transcript_text=preprocessed_text,  # Store preprocessed text
+                        raw_transcript_text=raw_whisper_text,  # Store raw Whisper output for debugging
+                        transcript_text=preprocessed_text,  # Store preprocessed text for display
                         english_translation=english_translation
                     )
                     db.add(recording_segment)
