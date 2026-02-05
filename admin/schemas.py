@@ -60,6 +60,14 @@ class UserAnalyticsResponse(BaseModel):
     account_age_days: int
 
 
+class UserAnalyticsListResponse(BaseModel):
+    total: int
+    page: int
+    page_size: int
+    time_period: str
+    analytics: List[UserAnalyticsResponse]
+
+
 class SessionUserInfo(BaseModel):
     user_id: int
     email: str

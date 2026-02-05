@@ -2,7 +2,7 @@ import os
 from sqlalchemy.orm import Session
 from sqlalchemy import func, Date
 from typing import Optional, Tuple, List, Dict, Any
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from db.db import User, SystemStatistics, Session as SessionModel, RecordingSegment, Summary
 from utils.utils import get_logger
 
@@ -201,18 +201,31 @@ class AdminUserService:
         
         # Apply filters
         if search:
-            search_pattern = f"%{search}%"
-            query = query.filter(
-                (User.email.ilike(search_pattern)) | 
-                (User.name.ilike(search_pattern)) |
-                (User.username.ilike(search_pattern))
-            )
+            # Check if search is numeric (user ID)
+            if search.isdigit():
+                query = query.filter(User.id == int(search))
+            else:
+                # Search by email, name, or username
+                search_pattern = f"%{search}%"
+                query = query.filter(
+                    (User.email.ilike(search_pattern)) | 
+                    (User.name.ilike(search_pattern)) |
+                    (User.username.ilike(search_pattern))
+                )
         
         if is_admin is not None:
-            query = query.filter(User.is_admin == is_admin)
+            if is_admin:
+                query = query.filter(User.is_admin == True)
+            else:
+                # Include both False and NULL as "not admin"
+                query = query.filter((User.is_admin == False) | (User.is_admin.is_(None)))
         
         if is_disabled is not None:
-            query = query.filter(User.is_disabled == is_disabled)
+            if is_disabled:
+                query = query.filter(User.is_disabled == True)
+            else:
+                # Include both False and NULL as "not disabled"
+                query = query.filter((User.is_disabled == False) | (User.is_disabled.is_(None)))
         
         # Get total count
         total = query.count()
@@ -400,6 +413,191 @@ class AdminUserService:
             'days_since_last_session': days_since_last,
             'account_age_days': account_age_days
         }
+    
+    @staticmethod
+    def get_all_users_analytics(
+        db: Session,
+        page: int,
+        page_size: int,
+        time_period_days: Optional[int] = None,
+        search: Optional[str] = None
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        """
+        Get analytics for all users with optional time period filtering and search.
+        
+        Args:
+            db: Database session
+            page: Page number for pagination
+            page_size: Number of items per page
+            time_period_days: Filter sessions by time period (1, 7, 30, 90 days). 
+                            None means all time.
+            search: Search by user ID, email, name, or username
+        
+        Returns:
+            Tuple of (analytics list, total user count)
+        """
+        # Get all users
+        users_query = db.query(User)
+        
+        # Apply search filter
+        if search:
+            # Check if search is numeric (user ID)
+            if search.isdigit():
+                users_query = users_query.filter(User.id == int(search))
+            else:
+                # Search by email, name, or username
+                search_pattern = f"%{search}%"
+                users_query = users_query.filter(
+                    (User.email.ilike(search_pattern)) |
+                    (User.name.ilike(search_pattern)) |
+                    (User.username.ilike(search_pattern))
+                )
+        
+        total_users = users_query.count()
+        
+        # Apply pagination
+        offset = (page - 1) * page_size
+        users = users_query.order_by(User.created_at.desc()).offset(offset).limit(page_size).all()
+        
+        # Calculate the cutoff date for time period filtering
+        cutoff_date = None
+        if time_period_days is not None:
+            cutoff_date = datetime.utcnow() - timedelta(days=time_period_days)
+        
+        analytics_list = []
+        
+        for user in users:
+            # Base session query
+            session_query = db.query(SessionModel).filter(SessionModel.user_id == user.id)
+            
+            # Apply time period filter if specified
+            if cutoff_date:
+                session_query = session_query.filter(SessionModel.start_time >= cutoff_date)
+            
+            # Total sessions
+            total_sessions = session_query.count()
+            
+            # Sessions by status
+            completed_sessions = session_query.filter(
+                SessionModel.status == 'completed'
+            ).count()
+            
+            failed_sessions = session_query.filter(
+                SessionModel.status == 'failed'
+            ).count()
+            
+            deleted_sessions = session_query.filter(
+                SessionModel.is_deleted == True
+            ).count()
+            
+            active_sessions = session_query.filter(
+                SessionModel.status == 'recording'
+            ).count()
+            
+            # Duration statistics query (only completed sessions with end_time)
+            duration_query = db.query(
+                func.avg(
+                    func.extract('epoch', SessionModel.end_time - SessionModel.start_time) / 60
+                ).label('avg_duration'),
+                func.sum(
+                    func.extract('epoch', SessionModel.end_time - SessionModel.start_time) / 60
+                ).label('total_duration'),
+                func.max(
+                    func.extract('epoch', SessionModel.end_time - SessionModel.start_time) / 60
+                ).label('max_duration')
+            ).filter(
+                SessionModel.user_id == user.id,
+                SessionModel.end_time.isnot(None),
+                SessionModel.status == 'completed'
+            )
+            
+            # Apply time period filter to duration query
+            if cutoff_date:
+                duration_query = duration_query.filter(SessionModel.start_time >= cutoff_date)
+            
+            duration_stats = duration_query.first()
+            avg_duration = duration_stats.avg_duration if duration_stats else None
+            total_duration = duration_stats.total_duration if duration_stats else None
+            max_duration = duration_stats.max_duration if duration_stats else None
+            
+            # Recording segments statistics
+            segments_query = db.query(func.count(RecordingSegment.id)).join(
+                SessionModel, SessionModel.id == RecordingSegment.session_id
+            ).filter(SessionModel.user_id == user.id)
+            
+            # Apply time period filter to segments
+            if cutoff_date:
+                segments_query = segments_query.filter(SessionModel.start_time >= cutoff_date)
+            
+            total_segments = segments_query.scalar() or 0
+            
+            # Count total words in transcripts
+            words_query = db.query(
+                func.sum(
+                    func.coalesce(
+                        func.length(RecordingSegment.transcript_text) - 
+                        func.length(func.replace(RecordingSegment.transcript_text, ' ', '')) + 1,
+                        0
+                    )
+                )
+            ).join(
+                SessionModel, SessionModel.id == RecordingSegment.session_id
+            ).filter(
+                SessionModel.user_id == user.id,
+                RecordingSegment.transcript_text.isnot(None),
+                RecordingSegment.transcript_text != ''
+            )
+            
+            # Apply time period filter to words count
+            if cutoff_date:
+                words_query = words_query.filter(SessionModel.start_time >= cutoff_date)
+            
+            total_words = words_query.scalar()
+            
+            # Last session date in the time period
+            last_session_query = db.query(SessionModel.start_time).filter(
+                SessionModel.user_id == user.id
+            )
+            
+            # Apply time period filter to last session
+            if cutoff_date:
+                last_session_query = last_session_query.filter(SessionModel.start_time >= cutoff_date)
+            
+            last_session = last_session_query.order_by(SessionModel.start_time.desc()).first()
+            last_session_date = last_session[0] if last_session else None
+            
+            # Calculate days since last session
+            days_since_last = None
+            if last_session_date:
+                days_since_last = (datetime.utcnow() - last_session_date).days
+            
+            # Account age in days
+            account_age_days = (datetime.utcnow() - user.created_at).days
+            
+            analytics_list.append({
+                'user_id': user.id,
+                'email': user.email,
+                'name': user.name,
+                'username': user.username,
+                'is_admin': bool(user.is_admin) if user.is_admin is not None else False,
+                'is_disabled': bool(user.is_disabled) if user.is_disabled is not None else False,
+                'created_at': user.created_at,
+                'total_sessions': total_sessions,
+                'completed_sessions': completed_sessions,
+                'failed_sessions': failed_sessions,
+                'deleted_sessions': deleted_sessions,
+                'active_sessions': active_sessions,
+                'average_session_duration': float(avg_duration) if avg_duration else None,
+                'total_recording_time': float(total_duration) if total_duration else None,
+                'longest_session_duration': float(max_duration) if max_duration else None,
+                'total_recording_segments': total_segments,
+                'total_transcribed_words': int(total_words) if total_words else None,
+                'last_session_date': last_session_date,
+                'days_since_last_session': days_since_last,
+                'account_age_days': account_age_days
+            })
+        
+        return analytics_list, total_users
 
 
 class SystemStatisticsService:

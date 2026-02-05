@@ -20,7 +20,7 @@ logger = get_logger(__name__)
 async def list_users(
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(20, ge=1, le=100, description="Items per page"),
-    search: Optional[str] = Query(None, description="Search by email or name"),
+    search: Optional[str] = Query(None, description="Search by user ID (numeric), email, name, or username"),
     is_admin: Optional[bool] = Query(None, description="Filter by admin status"),
     is_disabled: Optional[bool] = Query(None, description="Filter by disabled status"),
     current_admin: User = Depends(get_current_admin),
@@ -28,6 +28,11 @@ async def list_users(
 ):
     """
     Get paginated list of users with optional filters.
+    
+    Search:
+    - Numeric input: Search by exact user ID
+    - Text input: Search by email, name, or username (partial match, case-insensitive)
+    
     Admin access required.
     """
     logger.info("=== Admin listing users - Admin ID: %s ===", current_admin.id)
