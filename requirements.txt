@@ -22,3 +22,4 @@ PyJWT
 python-dotenv
 requests
 boto3
+modal

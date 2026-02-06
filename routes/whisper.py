@@ -10,9 +10,12 @@ from pathlib import Path
 from datetime import datetime
 from contextlib import asynccontextmanager
 
-from ai_models.whisper.inference import transcribe_audio_file
-from ai_models.translator.inference import auto_detect_and_translate, translate_text
-from ai_models.summarizer.inference import summarize_transcriptions, clear_summarizer_cache
+# Use Modal deployed functions for serverless GPU inference
+from ai_models.modal_client import transcribe_audio_file, translate_text, summarize_transcriptions, clear_summarizer_cache
+# Local inference fallback (comment out Modal above if needed):
+# from ai_models.whisper.inference import transcribe_audio_file
+# from ai_models.translator.inference import auto_detect_and_translate, translate_text
+# from ai_models.summarizer.inference import summarize_transcriptions, clear_summarizer_cache
 from services.services import ConnectionManager
 from db.db import get_db, RecordingSegment, Summary, Session as DBSession, SessionLocal
 from schemas.schemas import AudioChunkMessage, TranscriptionResponse
