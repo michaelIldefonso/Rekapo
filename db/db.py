@@ -117,6 +117,7 @@ class RecordingSegment(Base):
     session_id = Column(Integer, ForeignKey("sessions.id", ondelete="CASCADE"), nullable=False)
     segment_number = Column(Integer, nullable=False)
     audio_path = Column(String(500), nullable=False)
+    raw_transcript_text = Column(Text, nullable=True, comment="Raw Whisper output before preprocessing (for debugging)")
     transcript_text = Column(Text, comment="Preprocessed transcription after Whisper + phonetic correction + dictionary lookup")
     english_translation = Column(Text, comment="English translation of the transcript")
     rating = Column(Integer, nullable=True, comment="User rating for transcription quality (1-5 scale)")

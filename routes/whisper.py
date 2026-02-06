@@ -1,5 +1,6 @@
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 import json
 import base64
 import os
@@ -539,8 +540,9 @@ async def websocket_transcribe(websocket: WebSocket):
                     )
                     db.add(recording_segment)
                     db.commit()
+                    print(f"{Colors.GREEN}✅ Segment {segment_number} saved to database for session {session_id}{Colors.ENDC}")
                 except Exception as e:
-                    print(f"Database save error: {e}")
+                    print(f"{Colors.RED}Database save error: {e}{Colors.ENDC}")
                     db.rollback()
                 finally:
                     db.close()
@@ -682,7 +684,7 @@ async def websocket_transcribe(websocket: WebSocket):
     
     except WebSocketDisconnect:
         manager.disconnect(websocket)
-        print(f"{Colors.YELLOW}📱 Client disconnected from meeting recording{Colors.ENDC}")
+        print(f"{Colors.YELLOW}📱 Client disconnected from meeting recording (session {current_session_id}){Colors.ENDC}")
         
         # Update session status if there was an active session
         if current_session_id is not None:
@@ -695,10 +697,12 @@ async def websocket_transcribe(websocket: WebSocket):
                 if session:
                     # Only update if still active (not already completed/failed)
                     if session.status in ["recording", "in_progress"]:
-                        # Check if session has any segments
-                        segment_count = db.query(RecordingSegment).filter(
+                        # Check if session has any segments - use a fresh query with explicit refresh
+                        segment_count = db.query(func.count(RecordingSegment.id)).filter(
                             RecordingSegment.session_id == current_session_id
-                        ).count()
+                        ).scalar()
+                        
+                        print(f"{Colors.CYAN}📊 Segment check for session {current_session_id}: Found {segment_count} segments{Colors.ENDC}")
                         
                         if segment_count > 0:
                             # Session has content - mark as completed
@@ -739,6 +743,8 @@ async def websocket_transcribe(websocket: WebSocket):
                         print(f"{Colors.YELLOW}⚠️  Session {current_session_id} already in '{session.status}' status, skipping update{Colors.ENDC}")
             except Exception as e:
                 print(f"{Colors.RED}❌ Failed to update session status on disconnect: {e}{Colors.ENDC}")
+                import traceback
+                traceback.print_exc()
                 db.rollback()
             finally:
                 db.close()
