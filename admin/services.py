@@ -57,6 +57,10 @@ class AdminSessionService:
         # Format results with user info
         sessions = []
         for session, user in results:
+            # Fix missing created_at
+            if session.created_at is None:
+                session.created_at = datetime.utcnow()
+            
             session_dict = {
                 'id': session.id,
                 'user_id': session.user_id,
@@ -78,6 +82,9 @@ class AdminSessionService:
             }
             sessions.append(session_dict)
         
+        # Commit any timestamp fixes
+        db.commit()
+        
         return sessions, total
     
     @staticmethod
@@ -91,6 +98,12 @@ class AdminSessionService:
             return None
         
         session, user = result
+        
+        # Fix missing created_at
+        if session.created_at is None:
+            session.created_at = datetime.utcnow()
+            db.commit()
+        
         return {
             'id': session.id,
             'user_id': session.user_id,
@@ -123,15 +136,34 @@ class AdminSessionService:
         
         session, user = result
         
+        # Fix missing created_at
+        if session.created_at is None:
+            session.created_at = datetime.utcnow()
+        
         # Get all recording segments for this session
         segments = db.query(RecordingSegment).filter(
             RecordingSegment.session_id == session_id
         ).order_by(RecordingSegment.segment_number).all()
         
+        # Fix segments with missing created_at
+        for segment in segments:
+            if segment.created_at is None:
+                segment.created_at = datetime.utcnow()
+        
         # Get all summaries for this session
         summaries = db.query(Summary).filter(
             Summary.session_id == session_id
         ).order_by(Summary.chunk_range_start).all()
+        
+        # Fix summaries with missing generated_at
+        for summary in summaries:
+            if summary.generated_at is None:
+                summary.generated_at = datetime.utcnow()
+            if summary.is_final_summary is None:
+                summary.is_final_summary = False
+        
+        # Commit all timestamp fixes
+        db.commit()
         
         # Calculate session duration
         session_duration = None

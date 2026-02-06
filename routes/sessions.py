@@ -83,6 +83,11 @@ async def get_session(
             detail="Session not found"
         )
     
+    # Fix missing created_at
+    if session.created_at is None:
+        session.created_at = datetime.now()
+        db.commit()
+    
     return SessionResponse.model_validate(session)
 
 
@@ -141,6 +146,10 @@ async def update_session(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Session not found"
         )
+    
+    # Fix missing created_at
+    if session.created_at is None:
+        session.created_at = datetime.now()
     
     try:
         if request.session_title is not None:
