@@ -24,10 +24,22 @@ load_dotenv()
 # Database URL - use environment variable or default to SQLite
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./rekapo.db")
 
-engine = create_engine(
-    DATABASE_URL,
-    connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {}
-)
+# Create engine with connection pool health checks for PostgreSQL
+if "sqlite" in DATABASE_URL:
+    engine = create_engine(
+        DATABASE_URL,
+        connect_args={"check_same_thread": False}
+    )
+else:
+    # PostgreSQL/production settings with connection pool management
+    engine = create_engine(
+        DATABASE_URL,
+        pool_pre_ping=True,  # Test connections before using (fixes SSL disconnect)
+        pool_recycle=3600,   # Recycle connections after 1 hour
+        pool_size=5,         # Maintain 5 connections
+        max_overflow=10,     # Allow up to 10 overflow connections
+        echo_pool=False,     # Disable connection pool logging
+    )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
