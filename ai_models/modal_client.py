@@ -3,21 +3,18 @@ Modal client for calling deployed AI models
 Provides same interface as local inference files but calls Modal serverless functions
 """
 from typing import Optional, List, Dict, Any
-import os
-import sys
+import modal
 
-# Import the modal_app to get function handles
+# Connect to deployed Modal app
 print("🔗 Connecting to Modal deployed functions...")
 try:
-    # Add parent directory to path to import modal_app
-    parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    if parent_dir not in sys.path:
-        sys.path.insert(0, parent_dir)
+    # Look up the deployed app by name
+    app = modal.App.lookup("rekapo-ai", create_if_missing=False)
     
-    # Import the deployed functions directly
-    from modal_app import transcribe_audio as transcribe_fn
-    from modal_app import translate_text as translate_fn
-    from modal_app import summarize_text as summarize_fn
+    # Get function handles from deployed app
+    transcribe_fn = modal.Function.lookup("rekapo-ai", "transcribe_audio")
+    translate_fn = modal.Function.lookup("rekapo-ai", "translate_text")
+    summarize_fn = modal.Function.lookup("rekapo-ai", "summarize_text")
     
     print("✅ Modal functions connected successfully!")
 except Exception as e:
