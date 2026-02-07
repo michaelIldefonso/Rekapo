@@ -16,7 +16,7 @@ from schemas.schemas import (
     RateSegmentResponse
 )
 from utils.utils import get_logger
-from ai_models.summarizer.inference import summarize_transcriptions, clear_summarizer_cache
+from ai_models.modal_client import summarize_transcriptions, clear_summarizer_cache
 
 router = APIRouter()
 logger = get_logger(__name__)
