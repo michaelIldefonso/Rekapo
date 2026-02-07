@@ -17,10 +17,13 @@ def _get_modal_functions():
     if _transcribe_fn is None:
         print("🔗 Connecting to Modal deployed functions...")
         try:
-            # Get function handles from deployed app
-            _transcribe_fn = modal.Function.lookup("rekapo-ai", "transcribe_audio")
-            _translate_fn = modal.Function.lookup("rekapo-ai", "translate_text")
-            _summarize_fn = modal.Function.lookup("rekapo-ai", "summarize_text")
+            # Look up the deployed app
+            app = modal.App.lookup("rekapo-ai")
+            
+            # Get function handles from the app
+            _transcribe_fn = modal.Function.from_name("rekapo-ai", "transcribe_audio")
+            _translate_fn = modal.Function.from_name("rekapo-ai", "translate_text")
+            _summarize_fn = modal.Function.from_name("rekapo-ai", "summarize_text")
             
             print("✅ Modal functions connected successfully!")
         except Exception as e:
