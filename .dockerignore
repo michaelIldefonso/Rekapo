@@ -1,0 +1,6 @@
+ai_models/whisper/inference.py
+ai_models/translator/inference.py
+ai_models/summarizer/inference.py
+aio_models/whisper/models/
+ai_models/translator/nllb-1.3b-ct2/
+ai_models/summarizer/bart-ct2/

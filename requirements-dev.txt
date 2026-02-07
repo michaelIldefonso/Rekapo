@@ -1,0 +1,26 @@
+--extra-index-url https://download.pytorch.org/whl/nightly/cu133
+torch --pre
+faster-whisper
+transformers
+ctranslate2>=4.7.1
+accelerate
+bitsandbytes
+sentencepiece
+protobuf
+# All prod dependencies
+fastapi
+uvicorn[standard]
+websockets
+python-multipart
+sqlalchemy
+psycopg2-binary
+alembic
+pydantic[email]
+google-auth
+google-auth-oauthlib
+# google-genai
+PyJWT
+python-dotenv
+requests
+boto3
+modal

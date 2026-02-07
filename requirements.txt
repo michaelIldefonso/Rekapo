@@ -1,14 +1,5 @@
---extra-index-url https://download.pytorch.org/whl/nightly/cu133
-torch --pre
 fastapi
 uvicorn[standard]
-faster-whisper
-transformers
-ctranslate2>=4.7.1
-accelerate
-bitsandbytes
-sentencepiece
-protobuf
 websockets
 python-multipart
 sqlalchemy
