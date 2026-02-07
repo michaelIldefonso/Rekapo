@@ -5,22 +5,30 @@ Provides same interface as local inference files but calls Modal serverless func
 from typing import Optional, List, Dict, Any
 import modal
 
-# Connect to deployed Modal app
-print("🔗 Connecting to Modal deployed functions...")
-try:
-    # Look up the deployed app by name
-    app = modal.App.lookup("rekapo-ai", create_if_missing=False)
+# Lazy-load Modal functions (connect only when needed)
+_transcribe_fn = None
+_translate_fn = None
+_summarize_fn = None
+
+def _get_modal_functions():
+    """Connect to Modal functions on first use"""
+    global _transcribe_fn, _translate_fn, _summarize_fn
     
-    # Get function handles from deployed app
-    transcribe_fn = modal.Function.lookup("rekapo-ai", "transcribe_audio")
-    translate_fn = modal.Function.lookup("rekapo-ai", "translate_text")
-    summarize_fn = modal.Function.lookup("rekapo-ai", "summarize_text")
+    if _transcribe_fn is None:
+        print("🔗 Connecting to Modal deployed functions...")
+        try:
+            # Get function handles from deployed app
+            _transcribe_fn = modal.Function.lookup("rekapo-ai", "transcribe_audio")
+            _translate_fn = modal.Function.lookup("rekapo-ai", "translate_text")
+            _summarize_fn = modal.Function.lookup("rekapo-ai", "summarize_text")
+            
+            print("✅ Modal functions connected successfully!")
+        except Exception as e:
+            print(f"⚠️  Modal connection failed: {e}")
+            print("   Make sure Modal token is set and app is deployed")
+            raise
     
-    print("✅ Modal functions connected successfully!")
-except Exception as e:
-    print(f"⚠️  Modal connection failed: {e}")
-    print("   Make sure you've deployed with: modal deploy modal_app.py")
-    raise
+    return _transcribe_fn, _translate_fn, _summarize_fn
 
 
 def transcribe_audio_file(
@@ -47,6 +55,9 @@ def transcribe_audio_file(
     Returns:
         dict with transcription results
     """
+    # Get Modal functions (lazy load)
+    transcribe_fn, _, _ = _get_modal_functions()
+    
     # Read audio file
     with open(audio_path, "rb") as f:
         audio_bytes = f.read()
@@ -83,6 +94,9 @@ def translate_text(
     Returns:
         dict with translated text
     """
+    # Get Modal functions (lazy load)
+    _, translate_fn, _ = _get_modal_functions()
+    
     # Call Modal function
     result = translate_fn.remote(text, source_lang=source_lang, target_lang=target_lang)
     
@@ -109,6 +123,9 @@ def summarize_transcriptions(
     Returns:
         dict with summary and chunk count
     """
+    # Get Modal functions (lazy load)
+    _, _, summarize_fn = _get_modal_functions()
+    
     # Combine all English translations
     combined_text = " ".join([
         t.get("english_translation", "") for t in transcriptions
