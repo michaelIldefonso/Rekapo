@@ -49,44 +49,50 @@ class Colors:
     UNDERLINE = '\033[4m'
 
 def log_to_mobile(message_type: str, data: dict, session_id: str = None):
-    """Log messages being sent to mobile app with colored output"""
-    timestamp = datetime.now().strftime("%H:%M:%S")
+    """Log messages being sent to mobile app"""
     
     if message_type == "connected":
-        print(f"{Colors.GREEN}[{timestamp}] 📱 → MOBILE: Connection established{Colors.ENDC}")
+        logger.info("📱 WebSocket connected - ready for recording")
     
     elif message_type == "processing":
-        print(f"{Colors.CYAN}[{timestamp}] 📱 → MOBILE [{session_id}]: Processing segment...{Colors.ENDC}")
+        logger.info(f"📱 Processing segment for session {session_id}")
     
     elif message_type == "transcription":
-        raw = data.get('raw_whisper_output', '')[:60]
-        text = data.get('transcription', '')[:60]
-        translation = data.get('english_translation', '')[:60]
+        raw = data.get('raw_whisper_output', '')
+        text = data.get('transcription', '')
+        translation = data.get('english_translation', '')
         lang = data.get('language', '')
         seg_num = data.get('segment_number', '')
-        print(f"{Colors.GREEN}[{timestamp}] 📱 → MOBILE [{session_id}] Segment #{seg_num}:{Colors.ENDC}")
-        print(f"  {Colors.BOLD}Raw Whisper ({lang}):{Colors.ENDC} {raw}...")
-        if raw != text:  # Only show preprocessed if it differs
-            print(f"  {Colors.BOLD}Preprocessed:{Colors.ENDC} {text}...")
-        print(f"  {Colors.BOLD}Translation:{Colors.ENDC} {translation}...")
+        duration = data.get('duration', 0)
+        
+        logger.info(f"📱 Transcription sent - Session: {session_id}, Segment: #{seg_num}, Lang: {lang}, Duration: {duration:.2f}s")
+        logger.info(f"   Raw Whisper ({lang}): {raw[:100]}{'...' if len(raw) > 100 else ''}")
+        
+        if raw != text:
+            logger.info(f"   Preprocessed: {text[:100]}{'...' if len(text) > 100 else ''}")
+        
+        logger.info(f"   Translation (EN): {translation[:100]}{'...' if len(translation) > 100 else ''}")
     
     elif message_type == "summary":
-        summary = data.get('summary', '')[:80]
+        summary = data.get('summary', '')
         chunk_count = data.get('chunk_count', '')
-        print(f"{Colors.BLUE}[{timestamp}] 📱 → MOBILE [{session_id}]: Summary (chunks: {chunk_count}):{Colors.ENDC}")
-        print(f"  {summary}...")
+        logger.info(f"📱 Summary sent - Session: {session_id}, Chunks: {chunk_count}")
+        logger.info(f"   Summary: {summary[:150]}{'...' if len(summary) > 150 else ''}")
     
     elif message_type == "skipped":
         reason = data.get('message', '')
-        print(f"{Colors.YELLOW}[{timestamp}] 📱 → MOBILE [{session_id}]: Skipped - {reason}{Colors.ENDC}")
+        logger.warning(f"📱 Segment skipped - Session: {session_id}, Reason: {reason}")
     
     elif message_type == "error":
         error = data.get('message', '')
-        print(f"{Colors.RED}[{timestamp}] 📱 → MOBILE: Error - {error}{Colors.ENDC}")
+        logger.error(f"📱 Error sent to mobile: {error}")
 
-# Print active translation configuration
-print(f"🌐 Translation Model: NLLB-200")
-print(f"📝 Taglish Preprocessing: {'ENABLED' if ENABLE_TAGLISH_PREPROCESSING else 'DISABLED'}")
+# Log active translation configuration
+logger.info("=" * 70)
+logger.info("🌐 Translation Configuration")
+logger.info(f"   Model: NLLB-200")
+logger.info(f"   Taglish Preprocessing: {'ENABLED' if ENABLE_TAGLISH_PREPROCESSING else 'DISABLED'}")
+logger.info("=" * 70)
 
 
 def translate_to_english(text: str, detected_lang: str = "tl") -> str:
@@ -196,26 +202,25 @@ async def cleanup_invalid_segment(temp_file_to_cleanup, audio_path, audio_path_s
     if temp_file_to_cleanup and temp_file_to_cleanup.exists():
         try:
             temp_file_to_cleanup.unlink()
-        except Exception as e:
-            print(f"Failed to cleanup temp file: {e}")
-    
-    # Clean up local storage file if using local storage (not R2)
-    if not R2_ENABLED and isinstance(audio_path, Path) and audio_path.exists():
-        try:
-            audio_path.unlink()
-        except Exception as e:
-            print(f"Failed to cleanup local file: {e}")
-    
-    # Clean up R2 file if it was uploaded
-    if R2_ENABLED and audio_path_str:
-        try:
-            r2_client.delete_file(audio_path_str)
-        except Exception as e:
-            print(f"Failed to cleanup R2 file: {e}")
-
-@router.websocket("/ws/transcribe")
-async def websocket_transcribe(websocket: WebSocket):
-    """
+                        logger.debug(f"Cleaned up temp file: {temp_file_to_cleanup}")
+                    except Exception as e:
+                        logger.warning(f"Failed to cleanup temp file: {e}")
+                
+                # Clean up local storage file if using local storage (not R2)
+                if not R2_ENABLED and isinstance(audio_path, Path) and audio_path.exists():
+                    try:
+                        audio_path.unlink()
+                        logger.debug(f"Cleaned up local file: {audio_path}")
+                    except Exception as e:
+                        logger.warning(f"Failed to cleanup local file: {e}")
+                
+                # Clean up R2 file if it was uploaded
+                if R2_ENABLED and audio_path_str:
+                    try:
+                        r2_client.delete_file(audio_path_str)
+                        logger.debug(f"Cleaned up R2 file: {audio_path_str}")
+                    except Exception as e:
+                        logger.warning(f"Failed to cleanup R2 file: {e}")
     WebSocket endpoint for real-time meeting transcription.
     Designed for mobile voice recording with VAD-based chunking.
     
@@ -306,7 +311,7 @@ async def websocket_transcribe(websocket: WebSocket):
                             "connections": [websocket]
                         }
                         manager.session_transcriptions[session_id] = []
-                        print(f"{Colors.GREEN}📝 Initialized session {session_id} in manager{Colors.ENDC}")
+                        logger.info(f"📝 Session {session_id} initialized in connection manager")
                 
                 # For processing messages and file naming, we may need a temporary number
                 # The real segment_number will be assigned after validation
@@ -323,10 +328,13 @@ async def websocket_transcribe(websocket: WebSocket):
                 
                 # Decode base64 audio
                 audio_data = base64.b64decode(message["audio"])
+                audio_size_kb = len(audio_data) / 1024
+                logger.debug(f"Decoded audio data - Session: {session_id}, Size: {audio_size_kb:.2f}KB")
                 
                 # Save audio file permanently for the session
                 filename = message.get("filename", f"segment_{temp_segment_id}.wav")
                 suffix = Path(filename).suffix or ".wav"
+                logger.debug(f"Audio filename: {filename}, Format: {suffix}")
                 
                 # Determine content type for audio
                 content_type_map = {
@@ -344,17 +352,20 @@ async def websocket_transcribe(websocket: WebSocket):
                 if R2_ENABLED:
                     # Upload to R2 for permanent storage (will be deleted if validation fails)
                     r2_key = f"{R2_AUDIO_PREFIX}/session_{session_id}/segment_{temp_segment_id}{suffix}"
+                    logger.debug(f"Uploading to R2: {r2_key}")
                     audio_path_str = r2_client.upload_file(
                         file_content=audio_data,
                         key=r2_key,
                         content_type=content_type
                     )
+                    logger.debug(f"R2 upload successful: {audio_path_str}")
                     
                     # Whisper needs a local file, so create a temporary one
                     temp_audio_path = AUDIO_STORAGE_DIR / f"temp_session_{session_id}_segment_{temp_segment_id}{suffix}"
                     temp_audio_path.parent.mkdir(parents=True, exist_ok=True)
                     with open(temp_audio_path, "wb") as f:
                         f.write(audio_data)
+                    logger.debug(f"Created temp file for transcription: {temp_audio_path}")
                     
                     # Use temp file for transcription
                     audio_path = temp_audio_path
@@ -366,6 +377,7 @@ async def websocket_transcribe(websocket: WebSocket):
                     with open(audio_path, "wb") as f:
                         f.write(audio_data)
                     audio_path_str = str(audio_path)
+                    logger.debug(f"Saved to local storage: {audio_path_str}")
                 
                 # Transcribe with faster-whisper
                 language = message.get("language", None)  # Auto-detect Tagalog/English
@@ -390,9 +402,13 @@ async def websocket_transcribe(websocket: WebSocket):
                         # Limit to ~200 characters to avoid token limit
                         if len(initial_prompt) > 200:
                             initial_prompt = initial_prompt[-200:]
-                        print(f"🔗 Using context from last {len(recent_transcriptions)} chunks: {initial_prompt[:80]}...")
+                        logger.debug(f"🔗 Context from last {len(recent_transcriptions)} chunks: {initial_prompt[:80]}...")
                     else:
-                        print(f"📝 First chunk - no context available yet")
+                        logger.debug(f"📝 First chunk for session {session_id} - no context available")
+                else:
+                    logger.debug(f"Using client-provided initial prompt: {initial_prompt[:80]}...")
+                
+                logger.info(f"🎙️ Starting transcription - Session: {session_id}, Model: {model or 'fine-tuned'}, Beam: {beam_size}, Temp: {temperature}")
                 
                 result = transcribe_audio_file(
                     str(audio_path),
@@ -407,9 +423,13 @@ async def websocket_transcribe(websocket: WebSocket):
                     initial_prompt=initial_prompt
                 )
                 
+                logger.info(f"✅ Transcription complete - Lang: {result['language']}, Confidence: {result['language_probability']:.2f}, Duration: {result['duration']:.2f}s")
+                
                 # Force detected language to be either Tagalog or English
                 # If Whisper detects another language, default to Tagalog
+                original_lang = result["language"]
                 if result["language"] not in ["tl", "en"]:
+                    logger.warning(f"Whisper detected unexpected language '{original_lang}', defaulting to Tagalog")
                     result["language"] = "tl"  # Default to Tagalog for non-English
                 
                 # Store raw Whisper output for logging/debugging
@@ -417,7 +437,7 @@ async def websocket_transcribe(websocket: WebSocket):
                 
                 # Check if transcription is empty (skip empty segments)
                 if not raw_whisper_text or not raw_whisper_text.strip():
-                    print(f"Skipping empty segment for session {session_id}")
+                    logger.warning(f"⚠️ Empty transcription detected - Session: {session_id}, Duration: {result['duration']:.2f}s")
                     await cleanup_invalid_segment(temp_file_to_cleanup, audio_path, audio_path_str, session_id)
                     skip_msg = {
                         "status": "skipped",
@@ -433,18 +453,24 @@ async def websocket_transcribe(websocket: WebSocket):
                 if result["language"] == "tl" and ENABLE_TAGLISH_PREPROCESSING:
                     try:
                         from ai_models.preprocessing import preprocess_taglish_text
-                        print(f"🔧 Applying Taglish preprocessing...")
+                        logger.debug(f"🔧 Applying Taglish preprocessing to session {session_id}")
                         preprocessing_result = preprocess_taglish_text(raw_whisper_text)
                         preprocessed_text = preprocessing_result["corrected_text"]
-                        print(f"  Raw: {raw_whisper_text[:80]}")
-                        print(f"  Preprocessed: {preprocessed_text[:80]}")
+                        
+                        changes_made = raw_whisper_text != preprocessed_text
+                        if changes_made:
+                            logger.info(f"📝 Preprocessing applied - Session: {session_id}")
+                            logger.debug(f"   Raw: {raw_whisper_text[:100]}")
+                            logger.debug(f"   Preprocessed: {preprocessed_text[:100]}")
+                        else:
+                            logger.debug(f"   No preprocessing changes needed")
                     except Exception as e:
-                        print(f"⚠️  Preprocessing failed, using raw text: {e}")
+                        logger.warning(f"⚠️ Preprocessing failed for session {session_id}, using raw text: {e}")
                         preprocessed_text = raw_whisper_text
                 
                 # Check if transcription contains non-Taglish characters (use preprocessed text)
                 if not is_valid_taglish_text(preprocessed_text):
-                    print(f"Skipping segment - contains non-Taglish characters")
+                    logger.warning(f"⚠️ Non-Taglish characters detected - Session: {session_id}, Text: {preprocessed_text[:50]}...")
                     await cleanup_invalid_segment(temp_file_to_cleanup, audio_path, audio_path_str, session_id)
                     skip_msg = {
                         "status": "skipped",
@@ -462,8 +488,10 @@ async def websocket_transcribe(websocket: WebSocket):
                     # Update manager's counter to match client's segment number
                     if session_id in manager.active_sessions:
                         manager.active_sessions[session_id]["segment_count"] = segment_number
+                    logger.debug(f"Using client-provided segment number: {segment_number}")
                 else:
                     segment_number = manager.increment_segment_count(session_id)
+                    logger.debug(f"Assigned segment number: {segment_number}")
                 
                 # Rename files to use official segment number (if temp ID was used)
                 if client_segment_number is None:
@@ -478,9 +506,9 @@ async def websocket_transcribe(websocket: WebSocket):
                             
                             # Delete old file
                             r2_client.delete_file(old_r2_key)
-                            print(f"Renamed R2 file from {old_r2_key} to {new_r2_key}")
+                            logger.debug(f"R2 file renamed: {old_r2_key} -> {new_r2_key}")
                         except Exception as e:
-                            print(f"Failed to rename R2 file: {e}")
+                            logger.warning(f"Failed to rename R2 file: {e}")
                             # Keep using the temp_segment_id path if rename fails
                     else:
                         # Rename local file to use official segment number
@@ -490,13 +518,14 @@ async def websocket_transcribe(websocket: WebSocket):
                                 audio_path.rename(new_audio_path)
                                 audio_path = new_audio_path
                                 audio_path_str = str(audio_path)
-                                print(f"Renamed local file to segment_{segment_number}{suffix}")
+                                logger.debug(f"Local file renamed to segment_{segment_number}{suffix}")
                         except Exception as e:
-                            print(f"Failed to rename local file: {e}")
+                            logger.warning(f"Failed to rename local file: {e}")
                             # Keep using the temp_segment_id path if rename fails
                 
                 # Translate preprocessed text to English
                 try:
+                    logger.debug(f"🌐 Starting translation - Session: {session_id}, Lang: {result['language']} -> EN")
                     # Run translation in thread pool to not block event loop
                     import asyncio as async_io  # Import with alias to avoid closure issues
                     loop = async_io.get_event_loop()
@@ -506,8 +535,9 @@ async def websocket_transcribe(websocket: WebSocket):
                         preprocessed_text,  # Use preprocessed text
                         result["language"]
                     )
+                    logger.debug(f"✅ Translation complete - Session: {session_id}")
                 except Exception as e:
-                    print(f"Translation error: {e}")
+                    logger.error(f"❌ Translation error for session {session_id}: {e}")
                     import traceback
                     traceback.print_exc()
                     english_translation = preprocessed_text
@@ -531,10 +561,11 @@ async def websocket_transcribe(websocket: WebSocket):
                 log_to_mobile("transcription", response, session_id)
                 try:
                     await websocket.send_json(response)
+                    logger.debug(f"✅ Response sent to client - Session: {session_id}, Segment: {segment_number}")
                 except Exception as _send_err:
                     send_err = _send_err
                     # Client disconnected while we were processing - treat as normal disconnect
-                    print(f"{Colors.YELLOW}⚠️  Client disconnected during send for session {session_id}: {send_err}{Colors.ENDC}")
+                    logger.warning(f"⚠️ Client disconnected during send - Session: {session_id}, Error: {send_err}")
                     # Still save to DB below, then raise WebSocketDisconnect to trigger proper cleanup
                     # (segment was processed successfully, just couldn't deliver to client)
                 
@@ -551,9 +582,9 @@ async def websocket_transcribe(websocket: WebSocket):
                     )
                     db.add(recording_segment)
                     db.commit()
-                    print(f"{Colors.GREEN}✅ Segment {segment_number} saved to database for session {session_id}{Colors.ENDC}")
+                    logger.info(f"💾 Segment saved to database - Session: {session_id}, Segment: {segment_number}, Path: {audio_path_str}")
                 except Exception as e:
-                    print(f"{Colors.RED}Database save error: {e}{Colors.ENDC}")
+                    logger.error(f"❌ Database save error - Session: {session_id}, Segment: {segment_number}, Error: {e}")
                     db.rollback()
                 finally:
                     db.close()
@@ -561,8 +592,9 @@ async def websocket_transcribe(websocket: WebSocket):
                     if temp_file_to_cleanup and temp_file_to_cleanup.exists():
                         try:
                             temp_file_to_cleanup.unlink()
+                            logger.debug(f"Cleaned up temp file after DB save")
                         except Exception as e:
-                            print(f"Failed to cleanup temp file: {e}")
+                            logger.warning(f"Failed to cleanup temp file after DB save: {e}")
                 
                 # Store transcription for summarization (use preprocessed text)
                 manager.add_transcription(session_id, {
@@ -582,23 +614,23 @@ async def websocket_transcribe(websocket: WebSocket):
                 current_segment_count = manager.active_sessions.get(session_id, {}).get("segment_count", 0)
                 total_transcriptions = len(manager.get_transcriptions(session_id))
                 
-                print(f"{Colors.BOLD}📊 Summarization Check [{session_id}]:{Colors.ENDC}")
-                print(f"  • Current segment: #{segment_number}")
-                print(f"  • Total segments in session: {current_segment_count}")
-                print(f"  • Transcriptions buffered: {total_transcriptions}")
-                print(f"  • Should summarize? (segment % 10 == 0): {current_segment_count % 10 == 0}")
+                logger.info(f"📊 Summarization Check - Session: {session_id}")
+                logger.info(f"   Current Segment: #{segment_number}")
+                logger.info(f"   Total Segments: {current_segment_count}")
+                logger.info(f"   Buffered Transcriptions: {total_transcriptions}")
+                logger.info(f"   Trigger Summary: {current_segment_count % 10 == 0} (every 10 segments)")
                 
                 # Check if we should generate a summary (every 10 chunks)
                 if manager.should_summarize(session_id, chunk_threshold=10):
-                    print(f"{Colors.BLUE}{Colors.BOLD}🔄 TRIGGERING SUMMARIZATION for session {session_id} (segment {segment_number}){Colors.ENDC}")
+                    logger.info(f"🔄 TRIGGERING SUMMARIZATION - Session: {session_id}, Segment: {segment_number}")
                     
                     # Run summarization in background to avoid blocking WebSocket
                     async def run_summarization_background():
                         try:
                             # Get all transcriptions for this session
                             transcriptions = manager.get_transcriptions(session_id)
-                            print(f"{Colors.CYAN}  • Fetched {len(transcriptions)} transcriptions{Colors.ENDC}")
-                            print(f"{Colors.CYAN}  • Summarizing last 10 chunks in background...{Colors.ENDC}")
+                            logger.info(f"📚 Fetched {len(transcriptions)} transcriptions for session {session_id}")
+                            logger.info(f"📝 Summarizing last 10 chunks (segments {segment_number-9} to {segment_number})...")
                             
                             # Run heavy summarization in thread pool to not block event loop
                             import asyncio
@@ -616,7 +648,8 @@ async def websocket_transcribe(websocket: WebSocket):
                                     )
                                 )
                             
-                            print(f"{Colors.GREEN}  ✅ Summary generated: {summary_result['summary'][:100]}...{Colors.ENDC}")
+                            logger.info(f"✅ Summary generated - Session: {session_id}, Length: {len(summary_result['summary'])} chars")
+                            logger.debug(f"   Summary preview: {summary_result['summary'][:150]}...")
                             
                             # Send summary to client
                             summary_msg = {
@@ -628,19 +661,18 @@ async def websocket_transcribe(websocket: WebSocket):
                                 "is_summary": True
                             }
                             
-                            print(f"{Colors.BLUE}{Colors.BOLD}📤 SENDING SUMMARY TO FRONTEND:{Colors.ENDC}")
-                            print(f"{Colors.CYAN}  • Session ID: {session_id}{Colors.ENDC}")
-                            print(f"{Colors.CYAN}  • Chunk Range: {segment_number-9} to {segment_number}{Colors.ENDC}")
-                            print(f"{Colors.CYAN}  • Summary Length: {len(summary_result['summary'])} chars{Colors.ENDC}")
-                            print(f"{Colors.CYAN}  • Full Summary: {summary_result['summary']}{Colors.ENDC}")
-                            print(f"{Colors.CYAN}  • WebSocket Connected: {websocket.client_state.name}{Colors.ENDC}")
+                            logger.info(f"📤 Sending summary to client - Session: {session_id}")
+                            logger.info(f"   Chunk Range: {segment_number-9} to {segment_number}")
+                            logger.info(f"   Summary Length: {len(summary_result['summary'])} chars")
+                            logger.debug(f"   Full Summary: {summary_result['summary']}")
+                            logger.debug(f"   WebSocket State: {websocket.client_state.name}")
                             
                             log_to_mobile("summary", summary_msg, session_id)
                             try:
                                 await websocket.send_json(summary_msg)
-                                print(f"{Colors.GREEN}  ✅ Summary sent to frontend successfully{Colors.ENDC}")
+                                logger.info(f"✅ Summary sent to client successfully - Session: {session_id}")
                             except Exception as e:
-                                print(f"{Colors.YELLOW}  ⚠️  Client already disconnected, summary not sent (but still saved to DB){Colors.ENDC}")
+                                logger.warning(f"⚠️ Client disconnected, summary not sent but will be saved to DB - Session: {session_id}")
                             
                             # Save summary to database
                             db_summary = SessionLocal()
@@ -654,15 +686,17 @@ async def websocket_transcribe(websocket: WebSocket):
                                 )
                                 db_summary.add(summary)
                                 db_summary.commit()
-                                print(f"{Colors.GREEN}  ✅ Summary saved to database{Colors.ENDC}")
+                                logger.info(f"💾 Summary saved to database - Session: {session_id}, Range: {segment_number-9}-{segment_number}")
                             except Exception as e:
-                                print(f"{Colors.RED}  ❌ Summary database save error: {e}{Colors.ENDC}")
+                                logger.error(f"❌ Summary database save error - Session: {session_id}, Error: {e}")
                                 db_summary.rollback()
                             finally:
                                 db_summary.close()
                             
                         except Exception as e:
-                            print(f"{Colors.RED}❌ Summarization error: {e}{Colors.ENDC}")
+                            logger.error(f"❌ Summarization error - Session: {session_id}, Error: {e}")
+                            import traceback
+                            logger.error(traceback.format_exc())
                             error_msg = {
                                 "status": "error",
                                 "message": f"Summarization failed: {str(e)}",
@@ -675,16 +709,16 @@ async def websocket_transcribe(websocket: WebSocket):
                                 pass  # Client already disconnected
                         finally:
                             # Always clear Qwen cache after summarization to free GPU memory
-                            print(f"{Colors.CYAN}🧹 Clearing summarizer cache to free GPU memory...{Colors.ENDC}")
+                            logger.debug(f"🧹 Clearing summarizer cache to free GPU memory...")
                             clear_summarizer_cache()
-                            print(f"{Colors.GREEN}  ✅ GPU memory freed for next cycle{Colors.ENDC}")
+                            logger.debug(f"✅ GPU memory freed for next cycle")
                     
                     # Fire and forget - don't wait for summarization
                     import asyncio
                     asyncio.create_task(run_summarization_background())
-                    print(f"{Colors.YELLOW}  ⚡ Summarization running in background (non-blocking){Colors.ENDC}")
+                    logger.info(f"⚡ Summarization task started in background (non-blocking) - Session: {session_id}")
                 else:
-                    print(f"{Colors.YELLOW}  ⏭️  Skipping summarization (not at 10-segment boundary){Colors.ENDC}")
+                    logger.debug(f"⏭️ Skipping summarization - Session: {session_id} (not at 10-segment boundary)")
                 
                 # Database operations are now handled inline above
                 
@@ -705,7 +739,7 @@ async def websocket_transcribe(websocket: WebSocket):
     
     except WebSocketDisconnect:
         manager.disconnect(websocket)
-        print(f"{Colors.YELLOW}📱 Client disconnected from meeting recording (session {current_session_id}){Colors.ENDC}")
+        logger.info(f"📱 Client disconnected - Session: {current_session_id}")
         
         # Update session status if there was an active session
         if current_session_id is not None:
@@ -723,19 +757,19 @@ async def websocket_transcribe(websocket: WebSocket):
                             RecordingSegment.session_id == current_session_id
                         ).scalar()
                         
-                        print(f"{Colors.CYAN}📊 Segment check for session {current_session_id}: Found {segment_count} segments{Colors.ENDC}")
+                        logger.info(f"📊 Disconnect cleanup - Session: {current_session_id}, Segments: {segment_count}")
                         
                         if segment_count > 0:
                             # Session has content - mark as completed
                             session.status = "completed"
                             session.end_time = datetime.now()
                             db.commit()
-                            print(f"{Colors.GREEN}✅ Session {current_session_id} marked as 'completed' ({segment_count} segments recorded){Colors.ENDC}")
+                            logger.info(f"✅ Session {current_session_id} marked as 'completed' ({segment_count} segments recorded)")
                             
                             # Generate final summary in background thread (connection already closing)
                             def generate_final_summary_background():
                                 try:
-                                    print(f"{Colors.CYAN}📝 Generating final summary for session {current_session_id}...{Colors.ENDC}")
+                                    logger.info(f"📝 Generating final summary for session {current_session_id}...")
                                     
                                     # Import here to avoid circular dependency
                                     from routes.sessions import generate_session_summary_logic
@@ -743,34 +777,36 @@ async def websocket_transcribe(websocket: WebSocket):
                                     # Run directly in thread (no asyncio needed, connection is closing)
                                     generate_session_summary_logic(current_session_id)
                                     
-                                    print(f"{Colors.GREEN}✅ Final summary generated and saved for session {current_session_id}{Colors.ENDC}")
+                                    logger.info(f"✅ Final summary generated and saved for session {current_session_id}")
                                 except Exception as e:
-                                    print(f"{Colors.RED}❌ Failed to generate final summary for session {current_session_id}: {e}{Colors.ENDC}")
+                                    logger.error(f"❌ Failed to generate final summary for session {current_session_id}: {e}")
                             
                             # Run in daemon thread (survives WebSocket disconnect)
                             import threading
                             thread = threading.Thread(target=generate_final_summary_background, daemon=True)
                             thread.start()
-                            print(f"{Colors.YELLOW}⚡ Final summary generation triggered in background thread{Colors.ENDC}")
+                            logger.info(f"⚡ Final summary generation triggered in background thread - Session: {current_session_id}")
                         else:
                             # No segments recorded - mark as failed
                             session.status = "failed"
                             session.end_time = datetime.now()
                             db.commit()
-                            print(f"{Colors.RED}❌ Session {current_session_id} marked as 'failed' (no segments recorded){Colors.ENDC}")
+                            logger.warning(f"❌ Session {current_session_id} marked as 'failed' (no segments recorded)")
                         
                         logger.info(f"Session {current_session_id} auto-updated to '{session.status}' on disconnect ({segment_count} segments)")
                     else:
-                        print(f"{Colors.YELLOW}⚠️  Session {current_session_id} already in '{session.status}' status, skipping update{Colors.ENDC}")
+                        logger.warning(f"⚠️ Session {current_session_id} already in '{session.status}' status, skipping update")
             except Exception as e:
-                print(f"{Colors.RED}❌ Failed to update session status on disconnect: {e}{Colors.ENDC}")
+                logger.error(f"❌ Failed to update session status on disconnect: {e}")
                 import traceback
-                traceback.print_exc()
+                logger.error(traceback.format_exc())
                 db.rollback()
             finally:
                 db.close()
     except Exception as e:
-        print(f"{Colors.RED}WebSocket error: {e}{Colors.ENDC}")
+        logger.error(f"❌ WebSocket error: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         manager.disconnect(websocket)
         
         # Also update session status on unexpected errors
@@ -785,9 +821,9 @@ async def websocket_transcribe(websocket: WebSocket):
                     session.status = "failed"
                     session.end_time = datetime.now()
                     db.commit()
-                    print(f"{Colors.RED}❌ Session {current_session_id} marked as 'failed' due to error{Colors.ENDC}")
+                    logger.error(f"❌ Session {current_session_id} marked as 'failed' due to error")
             except Exception as db_error:
-                print(f"{Colors.RED}❌ Failed to update session on error: {db_error}{Colors.ENDC}")
+                logger.error(f"❌ Failed to update session on error: {db_error}")
                 db.rollback()
             finally:
                 db.close()

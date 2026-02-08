@@ -76,7 +76,9 @@ class ConnectionManager:
             try:
                 await connection.send_json(data)
             except Exception as e:
-                print(f"Error broadcasting JSON to connection: {e}")
+                from utils.utils import get_logger
+                logger = get_logger(__name__)
+                logger.warning(f"Error broadcasting JSON to connection: {e}")
     
     async def broadcast_to_session(self, session_id: int, data: dict):
         """Broadcast to all connections in a specific session."""
@@ -86,11 +88,9 @@ class ConnectionManager:
                 try:
                     await connection.send_json(data)
                 except Exception as e:
-                    print(f"Error broadcasting to session {session_id}: {e}")
-    
-    def get_connection_count(self) -> int:
-        """Get the number of active connections."""
-        return len(self.active_connections)
+                        from utils.utils import get_logger
+                        logger = get_logger(__name__)
+                        logger.warning(f"Error broadcasting to session {session_id}: {e}")
     
     def get_active_sessions_count(self) -> int:
         """Get the number of active recording sessions."""

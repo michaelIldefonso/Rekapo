@@ -1,9 +1,12 @@
-"""
+"""  
 Modal client for calling deployed AI models
 Provides same interface as local inference files but calls Modal serverless functions
 """
 from typing import Optional, List, Dict, Any
 import modal
+import logging
+
+logger = logging.getLogger("rekapo.modal")
 
 # Lazy-load Modal functions (connect only when needed)
 _transcribe_fn = None
@@ -15,7 +18,7 @@ def _get_modal_functions():
     global _transcribe_fn, _translate_fn, _summarize_fn
     
     if _transcribe_fn is None:
-        print("🔗 Connecting to Modal deployed functions...")
+        logger.info("🔗 Connecting to Modal deployed functions...")
         try:
             # Look up the deployed app
             app = modal.App.lookup("rekapo-ai")
@@ -25,10 +28,10 @@ def _get_modal_functions():
             _translate_fn = modal.Function.from_name("rekapo-ai", "translate_text")
             _summarize_fn = modal.Function.from_name("rekapo-ai", "summarize_text")
             
-            print("✅ Modal functions connected successfully!")
+            logger.info("✅ Modal functions connected successfully!")
         except Exception as e:
-            print(f"⚠️  Modal connection failed: {e}")
-            print("   Make sure Modal token is set and app is deployed")
+            logger.error(f"⚠️  Modal connection failed: {e}")
+            logger.error("   Make sure Modal token is set and app is deployed")
             raise
     
     return _transcribe_fn, _translate_fn, _summarize_fn

@@ -19,17 +19,25 @@ from config.config import PROFILE_PHOTOS_DIR
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup: Initialize database
-    print("Initializing database...")
+    import logging
+    logger = logging.getLogger("rekapo.startup")
+    logger.info("="*70)
+    logger.info("🚀 Starting Rekapo API Server")
+    logger.info("="*70)
+    logger.info("Initializing database...")
     init_db()
-    print("Database initialized successfully")
+    logger.info("✅ Database initialized successfully")
     
     # Ensure upload directories exist
     PROFILE_PHOTOS_DIR.mkdir(parents=True, exist_ok=True)
-    print(f"Upload directory ensured: {PROFILE_PHOTOS_DIR}")
+    logger.info(f"✅ Upload directory ensured: {PROFILE_PHOTOS_DIR}")
+    logger.info("="*70)
     
     yield
     # Shutdown: cleanup if needed
-    print("Shutting down...")
+    logger.info("="*70)
+    logger.info("🛑 Shutting down Rekapo API Server")
+    logger.info("="*70)
 
 app = FastAPI(
     title="Rekapo - Meeting Summarizer API",
