@@ -202,25 +202,29 @@ async def cleanup_invalid_segment(temp_file_to_cleanup, audio_path, audio_path_s
     if temp_file_to_cleanup and temp_file_to_cleanup.exists():
         try:
             temp_file_to_cleanup.unlink()
-                        logger.debug(f"Cleaned up temp file: {temp_file_to_cleanup}")
-                    except Exception as e:
-                        logger.warning(f"Failed to cleanup temp file: {e}")
-                
-                # Clean up local storage file if using local storage (not R2)
-                if not R2_ENABLED and isinstance(audio_path, Path) and audio_path.exists():
-                    try:
-                        audio_path.unlink()
-                        logger.debug(f"Cleaned up local file: {audio_path}")
-                    except Exception as e:
-                        logger.warning(f"Failed to cleanup local file: {e}")
-                
-                # Clean up R2 file if it was uploaded
-                if R2_ENABLED and audio_path_str:
-                    try:
-                        r2_client.delete_file(audio_path_str)
-                        logger.debug(f"Cleaned up R2 file: {audio_path_str}")
-                    except Exception as e:
-                        logger.warning(f"Failed to cleanup R2 file: {e}")
+            logger.debug(f"Cleaned up temp file: {temp_file_to_cleanup}")
+        except Exception as e:
+            logger.warning(f"Failed to cleanup temp file: {e}")
+    
+    # Clean up local storage file if using local storage (not R2)
+    if not R2_ENABLED and isinstance(audio_path, Path) and audio_path.exists():
+        try:
+            audio_path.unlink()
+            logger.debug(f"Cleaned up local file: {audio_path}")
+        except Exception as e:
+            logger.warning(f"Failed to cleanup local file: {e}")
+    
+    # Clean up R2 file if it was uploaded
+    if R2_ENABLED and audio_path_str:
+        try:
+            r2_client.delete_file(audio_path_str)
+            logger.debug(f"Cleaned up R2 file: {audio_path_str}")
+        except Exception as e:
+            logger.warning(f"Failed to cleanup R2 file: {e}")
+
+@router.websocket("/ws/transcribe")
+async def websocket_transcribe(websocket: WebSocket):
+    """
     WebSocket endpoint for real-time meeting transcription.
     Designed for mobile voice recording with VAD-based chunking.
     
