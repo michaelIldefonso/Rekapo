@@ -527,8 +527,16 @@ async def websocket_transcribe(websocket: WebSocket):
                     "segments": result["segments"]
                 }
                 
+                send_err = None
                 log_to_mobile("transcription", response, session_id)
-                await websocket.send_json(response)
+                try:
+                    await websocket.send_json(response)
+                except Exception as _send_err:
+                    send_err = _send_err
+                    # Client disconnected while we were processing - treat as normal disconnect
+                    print(f"{Colors.YELLOW}⚠️  Client disconnected during send for session {session_id}: {send_err}{Colors.ENDC}")
+                    # Still save to DB below, then raise WebSocketDisconnect to trigger proper cleanup
+                    # (segment was processed successfully, just couldn't deliver to client)
                 
                 # After sending to user, save to database
                 db = SessionLocal()
@@ -564,6 +572,11 @@ async def websocket_transcribe(websocket: WebSocket):
                     "language": result["language"],
                     "duration": result["duration"]
                 })
+                
+                # If client disconnected during send, raise WebSocketDisconnect
+                # so the proper disconnect handler runs (marks session completed, generates summary)
+                if send_err is not None:
+                    raise WebSocketDisconnect(code=1000)
                 
                 # Get current session info for logging
                 current_segment_count = manager.active_sessions.get(session_id, {}).get("segment_count", 0)
@@ -623,9 +636,11 @@ async def websocket_transcribe(websocket: WebSocket):
                             print(f"{Colors.CYAN}  • WebSocket Connected: {websocket.client_state.name}{Colors.ENDC}")
                             
                             log_to_mobile("summary", summary_msg, session_id)
-                            await websocket.send_json(summary_msg)
-                            
-                            print(f"{Colors.GREEN}  ✅ Summary sent to frontend successfully{Colors.ENDC}")
+                            try:
+                                await websocket.send_json(summary_msg)
+                                print(f"{Colors.GREEN}  ✅ Summary sent to frontend successfully{Colors.ENDC}")
+                            except Exception as e:
+                                print(f"{Colors.YELLOW}  ⚠️  Client already disconnected, summary not sent (but still saved to DB){Colors.ENDC}")
                             
                             # Save summary to database
                             db_summary = SessionLocal()
@@ -654,7 +669,10 @@ async def websocket_transcribe(websocket: WebSocket):
                                 "is_summary": True
                             }
                             log_to_mobile("error", error_msg)
-                            await websocket.send_json(error_msg)
+                            try:
+                                await websocket.send_json(error_msg)
+                            except Exception:
+                                pass  # Client already disconnected
                         finally:
                             # Always clear Qwen cache after summarization to free GPU memory
                             print(f"{Colors.CYAN}🧹 Clearing summarizer cache to free GPU memory...{Colors.ENDC}")

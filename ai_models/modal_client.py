@@ -143,7 +143,8 @@ def summarize_transcriptions(
     
     return {
         "summary": result["summary"],
-        "chunk_count": len(transcriptions)
+        "chunk_count": len(transcriptions),
+        "original_length": len(combined_text)
     }
 
 

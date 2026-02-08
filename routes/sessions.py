@@ -594,7 +594,7 @@ def generate_session_summary_logic(session_id: int):
             },
             "metadata": {
                 "total_segments": segment_count,
-                "original_length": summary_result["original_length"],
+                "original_length": summary_result.get("original_length", 0),
                 "summary_source": summary_source,
                 "was_cached": False
             }
