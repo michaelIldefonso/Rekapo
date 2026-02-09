@@ -52,11 +52,20 @@ class LogEntry(BaseModel):
     level: str  # 'info', 'warn', 'error', 'network'
     message: str
     timestamp: str
+    
+    class Config:
+        extra = "allow"  # Allow extra fields from mobile app
 
 
 class LogBatch(BaseModel):
     logs: List[LogEntry]
-    batch_timestamp: str
+    batch_timestamp: Optional[str] = None
+    timestamp: Optional[str] = None  # Alternative field name from mobile app
+    app_version: Optional[str] = None
+    platform: Optional[str] = None
+    
+    class Config:
+        extra = "allow"  # Allow extra fields from mobile app
 
 
 @router.post("/logs/write")
@@ -71,6 +80,9 @@ async def write_logs_to_r2(
     File path: logs/2026/02/09/user_123_14-30-00.json
     Endpoints: /api/logs/write or /api/logs/app
     """
+    logger.info("📥 Received log batch - User: %s, Logs: %d", 
+               current_user.id, len(log_batch.logs))
+    
     if not r2_client:
         logger.warning("R2 client not configured - logs not stored")
         raise HTTPException(
@@ -86,11 +98,15 @@ async def write_logs_to_r2(
             f"user_{current_user.id}_{now.strftime('%H-%M-%S')}.json"
         )
         
-        # Prepare log data
+        # Prepare log data (handle both timestamp field names from different mobile versions)
+        batch_time = log_batch.batch_timestamp or log_batch.timestamp or datetime.now().isoformat()
+        
         log_data = {
             "user_id": current_user.id,
             "user_email": current_user.email,
-            "batch_timestamp": log_batch.batch_timestamp,
+            "batch_timestamp": batch_time,
+            "app_version": log_batch.app_version,
+            "platform": log_batch.platform,
             "logs": [
                 {
                     "level": log.level,
