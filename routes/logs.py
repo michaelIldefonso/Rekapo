@@ -1,6 +1,8 @@
 import os
 import json
 import boto3
+from botocore.exceptions import ClientError
+from botocore.config import Config
 from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from typing import List, Optional
@@ -14,21 +16,36 @@ from utils.utils import get_logger
 router = APIRouter()
 logger = get_logger(__name__)
 
-# Initialize R2 client (S3-compatible)
-try:
-    r2_client = boto3.client(
-        's3',
-        endpoint_url=os.getenv('R2_ENDPOINT_URL'),
-        aws_access_key_id=os.getenv('R2_ACCESS_KEY_ID'),
-        aws_secret_access_key=os.getenv('R2_SECRET_ACCESS_KEY'),
-        region_name=os.getenv('R2_REGION', 'auto')
-    )
-    logger.info("✓ R2 client initialized successfully")
-except Exception as e:
-    logger.warning("⚠️ R2 client initialization failed: %s", str(e))
-    r2_client = None
-
+# Initialize R2 client (S3-compatible) for logging operations
+r2_client = None
 BUCKET_NAME = os.getenv('R2_BUCKET_NAME', 'rekapo')
+
+try:
+    endpoint_url = os.getenv('R2_ENDPOINT_URL')
+    access_key_id = os.getenv('R2_ACCESS_KEY_ID')
+    secret_access_key = os.getenv('R2_SECRET_ACCESS_KEY')
+    region = os.getenv('R2_REGION', 'auto')
+    
+    if not all([endpoint_url, access_key_id, secret_access_key]):
+        logger.warning("⚠️ R2 logging disabled - missing credentials (R2_ENDPOINT_URL, R2_ACCESS_KEY_ID, or R2_SECRET_ACCESS_KEY)")
+    else:
+        r2_client = boto3.client(
+            's3',
+            endpoint_url=endpoint_url,
+            aws_access_key_id=access_key_id,
+            aws_secret_access_key=secret_access_key,
+            region_name=region,
+            config=Config(
+                signature_version='s3v4',
+                s3={'addressing_style': 'path'}
+            )
+        )
+        logger.info("✓ R2 logging client initialized successfully")
+        logger.info("  - Bucket: %s", BUCKET_NAME)
+        logger.info("  - Endpoint: %s", endpoint_url)
+except Exception as e:
+    logger.error("❌ R2 client initialization failed: %s", str(e))
+    r2_client = None
 
 
 class LogEntry(BaseModel):
@@ -99,11 +116,19 @@ async def write_logs_to_r2(
             "file": file_path
         }
     
+    except ClientError as e:
+        error_code = e.response.get('Error', {}).get('Code', 'Unknown')
+        error_msg = e.response.get('Error', {}).get('Message', str(e))
+        logger.error("R2 ClientError writing logs: %s - %s", error_code, error_msg)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+            detail=f"Failed to write logs to R2: {error_code}"
+        )
     except Exception as e:
         logger.error("Error writing logs to R2: %s", str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
-            detail=f"Failed to write logs: {str(e)}"
+            detail="Failed to write logs"
         )
 
 
@@ -152,11 +177,18 @@ async def list_log_files(
         
         return {"files": files, "count": len(files)}
     
+    except ClientError as e:
+        error_code = e.response.get('Error', {}).get('Code', 'Unknown')
+        logger.error("R2 ClientError listing files: %s", error_code)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to list log files"
+        )
     except Exception as e:
         logger.error("Error listing log files: %s", str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            detail="Failed to list log files"
         )
 
 
@@ -203,10 +235,16 @@ async def view_log_file(
             "count": len(log_data['logs'])
         }
     
-    except r2_client.exceptions.NoSuchKey:
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'NoSuchKey':
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Log file not found"
+            )
+        logger.error("Error viewing log file: %s", str(e))
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Log file not found"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
         )
     except Exception as e:
         logger.error("Error viewing log file: %s", str(e))
@@ -600,11 +638,18 @@ async def cleanup_old_logs(
             "cutoff_date": cutoff_date.isoformat()
         }
     
+    except ClientError as e:
+        error_code = e.response.get('Error', {}).get('Code', 'Unknown')
+        logger.error("R2 ClientError during cleanup: %s", error_code)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to cleanup logs"
+        )
     except Exception as e:
         logger.error("Error cleaning up logs: %s", str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            detail="Failed to cleanup logs"
         )
 
 
@@ -638,5 +683,8 @@ def cleanup_old_logs_job():
         logger.info("[Cleanup Job] ✓ Deleted %d old log files (cutoff: %s)", 
                    deleted_count, cutoff_date.date())
     
+    except ClientError as e:
+        error_code = e.response.get('Error', {}).get('Code', 'Unknown')
+        logger.error("[Cleanup Job] R2 ClientError: %s", error_code)
     except Exception as e:
         logger.error("[Cleanup Job] Error cleaning up logs: %s", str(e))
