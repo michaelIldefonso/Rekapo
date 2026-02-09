@@ -60,6 +60,7 @@ class LogBatch(BaseModel):
 
 
 @router.post("/logs/write")
+@router.post("/logs/app")  # Alias for mobile app compatibility
 async def write_logs_to_r2(
     log_batch: LogBatch,
     current_user: User = Depends(get_current_user),
@@ -68,6 +69,7 @@ async def write_logs_to_r2(
     """
     Write logs to Cloudflare R2 bucket.
     File path: logs/2026/02/09/user_123_14-30-00.json
+    Endpoints: /api/logs/write or /api/logs/app
     """
     if not r2_client:
         logger.warning("R2 client not configured - logs not stored")
