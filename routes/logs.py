@@ -298,6 +298,265 @@ async def get_recent_errors(
         )
 
 
+@router.get("/logs/stats")
+async def get_log_stats(
+    hours: int = Query(24, ge=1, le=168, description="Hours to look back (max 168 = 1 week)"),
+    current_admin: User = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Get log statistics for dashboard widgets (admin only).
+    Returns total logs, error/warn/info counts, and top errors.
+    """
+    if not r2_client:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Log storage service not configured"
+        )
+    
+    try:
+        cutoff_time = datetime.now() - timedelta(hours=hours)
+        
+        stats = {
+            "total_logs": 0,
+            "errors": 0,
+            "warnings": 0,
+            "info": 0,
+            "top_errors": {},
+            "top_error_users": {}
+        }
+        
+        # Scan recent files
+        days_to_check = (hours // 24) + 2
+        for day_offset in range(days_to_check):
+            check_date = datetime.now() - timedelta(days=day_offset)
+            date_prefix = f"logs/{check_date.year}/{check_date.month:02d}/{check_date.day:02d}/"
+            
+            response = r2_client.list_objects_v2(
+                Bucket=BUCKET_NAME,
+                Prefix=date_prefix
+            )
+            
+            if 'Contents' not in response:
+                continue
+            
+            for obj in response['Contents']:
+                try:
+                    file_response = r2_client.get_object(
+                        Bucket=BUCKET_NAME,
+                        Key=obj['Key']
+                    )
+                    log_data = json.loads(file_response['Body'].read())
+                    
+                    for log in log_data.get('logs', []):
+                        log_time = datetime.fromisoformat(log['timestamp'].replace('Z', '+00:00'))
+                        if log_time.replace(tzinfo=None) >= cutoff_time:
+                            stats["total_logs"] += 1
+                            
+                            if log['level'] == 'error':
+                                stats["errors"] += 1
+                                # Track error messages
+                                error_msg = log['message'][:100]
+                                stats["top_errors"][error_msg] = stats["top_errors"].get(error_msg, 0) + 1
+                                # Track users with errors
+                                user_email = log_data.get('user_email', 'unknown')
+                                stats["top_error_users"][user_email] = stats["top_error_users"].get(user_email, 0) + 1
+                            elif log['level'] == 'warn':
+                                stats["warnings"] += 1
+                            else:
+                                stats["info"] += 1
+                except Exception as e:
+                    logger.warning("Error processing log file %s: %s", obj['Key'], str(e))
+                    continue
+        
+        # Format top lists
+        top_errors = sorted(stats["top_errors"].items(), key=lambda x: x[1], reverse=True)[:5]
+        top_error_users = sorted(stats["top_error_users"].items(), key=lambda x: x[1], reverse=True)[:5]
+        
+        logger.info("✓ Retrieved log stats (Admin: %s, Hours: %d, Total: %d)", 
+                   current_admin.id, hours, stats["total_logs"])
+        
+        return {
+            "period_hours": hours,
+            "total_logs": stats["total_logs"],
+            "errors": stats["errors"],
+            "warnings": stats["warnings"],
+            "info": stats["info"],
+            "top_errors": [{"message": msg, "count": count} for msg, count in top_errors],
+            "top_error_users": [{"email": email, "count": count} for email, count in top_error_users]
+        }
+    
+    except Exception as e:
+        logger.error("Error retrieving log stats: %s", str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@router.get("/logs/user/{user_id}")
+async def get_logs_by_user_id(
+    user_id: int,
+    hours: int = Query(24, ge=1, le=168, description="Hours to look back (max 168 = 1 week)"),
+    level: Optional[str] = Query(None, description="Filter by log level"),
+    current_admin: User = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Get all logs for a specific user from last N hours (admin only).
+    Searches by user ID.
+    """
+    if not r2_client:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Log storage service not configured"
+        )
+    
+    try:
+        cutoff_time = datetime.now() - timedelta(hours=hours)
+        user_logs = []
+        
+        # Scan recent days
+        days_to_check = (hours // 24) + 2
+        for day_offset in range(days_to_check):
+            check_date = datetime.now() - timedelta(days=day_offset)
+            date_prefix = f"logs/{check_date.year}/{check_date.month:02d}/{check_date.day:02d}/"
+            
+            response = r2_client.list_objects_v2(
+                Bucket=BUCKET_NAME,
+                Prefix=date_prefix
+            )
+            
+            if 'Contents' not in response:
+                continue
+            
+            for obj in response['Contents']:
+                # Check if filename contains user_id (format: user_{id}_timestamp.json)
+                if f"user_{user_id}_" in obj['Key']:
+                    try:
+                        file_response = r2_client.get_object(
+                            Bucket=BUCKET_NAME,
+                            Key=obj['Key']
+                        )
+                        log_data = json.loads(file_response['Body'].read())
+                        
+                        for log in log_data.get('logs', []):
+                            log_time = datetime.fromisoformat(log['timestamp'].replace('Z', '+00:00'))
+                            if log_time.replace(tzinfo=None) >= cutoff_time:
+                                # Filter by level if specified
+                                if level is None or log['level'] == level:
+                                    user_logs.append({
+                                        "timestamp": log['timestamp'],
+                                        "level": log['level'],
+                                        "message": log['message'],
+                                        "file": obj['Key']
+                                    })
+                    except Exception as e:
+                        logger.warning("Error processing log file %s: %s", obj['Key'], str(e))
+                        continue
+        
+        user_logs.sort(key=lambda x: x['timestamp'], reverse=True)
+        
+        logger.info("✓ Found %d logs for user %d (Admin: %s, Hours: %d)", 
+                   len(user_logs), user_id, current_admin.id, hours)
+        
+        return {
+            "user_id": user_id,
+            "logs": user_logs,
+            "count": len(user_logs),
+            "hours": hours
+        }
+    
+    except Exception as e:
+        logger.error("Error retrieving user logs: %s", str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@router.get("/logs/user/email/{email}")
+async def get_logs_by_email(
+    email: str,
+    hours: int = Query(24, ge=1, le=168, description="Hours to look back (max 168 = 1 week)"),
+    level: Optional[str] = Query(None, description="Filter by log level"),
+    current_admin: User = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Search logs by user email from last N hours (admin only).
+    Scans all log files and matches by email address.
+    """
+    if not r2_client:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Log storage service not configured"
+        )
+    
+    try:
+        cutoff_time = datetime.now() - timedelta(hours=hours)
+        matching_logs = []
+        
+        # Scan recent days
+        days_to_check = (hours // 24) + 2
+        for day_offset in range(days_to_check):
+            check_date = datetime.now() - timedelta(days=day_offset)
+            date_prefix = f"logs/{check_date.year}/{check_date.month:02d}/{check_date.day:02d}/"
+            
+            response = r2_client.list_objects_v2(
+                Bucket=BUCKET_NAME,
+                Prefix=date_prefix
+            )
+            
+            if 'Contents' not in response:
+                continue
+            
+            for obj in response['Contents']:
+                try:
+                    file_response = r2_client.get_object(
+                        Bucket=BUCKET_NAME,
+                        Key=obj['Key']
+                    )
+                    log_data = json.loads(file_response['Body'].read())
+                    
+                    # Check if email matches
+                    if log_data.get('user_email', '').lower() == email.lower():
+                        for log in log_data.get('logs', []):
+                            log_time = datetime.fromisoformat(log['timestamp'].replace('Z', '+00:00'))
+                            if log_time.replace(tzinfo=None) >= cutoff_time:
+                                if level is None or log['level'] == level:
+                                    matching_logs.append({
+                                        "user_id": log_data.get('user_id'),
+                                        "user_email": log_data.get('user_email'),
+                                        "timestamp": log['timestamp'],
+                                        "level": log['level'],
+                                        "message": log['message'],
+                                        "file": obj['Key']
+                                    })
+                except Exception as e:
+                    logger.warning("Error processing log file %s: %s", obj['Key'], str(e))
+                    continue
+        
+        matching_logs.sort(key=lambda x: x['timestamp'], reverse=True)
+        
+        logger.info("✓ Found %d logs for email %s (Admin: %s, Hours: %d)", 
+                   len(matching_logs), email, current_admin.id, hours)
+        
+        return {
+            "email": email,
+            "logs": matching_logs,
+            "count": len(matching_logs),
+            "hours": hours
+        }
+    
+    except Exception as e:
+        logger.error("Error searching logs by email: %s", str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
 @router.delete("/logs/cleanup")
 async def cleanup_old_logs(
     days: int = Query(30, ge=1, le=365, description="Delete logs older than N days"),
