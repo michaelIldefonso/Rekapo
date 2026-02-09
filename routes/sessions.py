@@ -303,11 +303,11 @@ async def get_session_details(
         # Define background task function
         def generate_summary_background():
             try:
-                print(f"📝 Generating missing final summary for old session {session_id}...")
+                logger.info(f"📝 Generating missing final summary for old session {session_id}...")
                 generate_session_summary_logic(session_id)
-                print(f"✅ Final summary generated for old session {session_id}")
+                logger.info(f"✅ Final summary generated for old session {session_id}")
             except Exception as e:
-                print(f"❌ Failed to generate final summary for session {session_id}: {e}")
+                logger.error(f"❌ Failed to generate final summary for session {session_id}: {e}")
         
         # Add to FastAPI background tasks (runs after response is sent)
         background_tasks.add_task(generate_summary_background)
@@ -594,7 +594,7 @@ def generate_session_summary_logic(session_id: int):
             },
             "metadata": {
                 "total_segments": segment_count,
-                "original_length": summary_result["original_length"],
+                "original_length": summary_result.get("original_length", 0),
                 "summary_source": summary_source,
                 "was_cached": False
             }
