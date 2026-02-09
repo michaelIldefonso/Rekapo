@@ -8,6 +8,7 @@ from routes.whisper import router as transcribe_router
 from routes.auth import router as auth_router
 from routes.users import router as users_router
 from routes.sessions import router as sessions_router
+from routes.logs import router as logs_router
 from admin.admin_auth import router as admin_auth_router
 from admin.admin_users import router as admin_users_router
 from admin.admin_statistics import router as admin_statistics_router
@@ -15,6 +16,7 @@ from admin.admin_sessions import router as admin_sessions_router
 from admin.admin_user_analytics import router as admin_user_analytics_router
 from db.db import init_db
 from config.config import PROFILE_PHOTOS_DIR
+from utils.scheduler import start_scheduler, stop_scheduler
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -31,12 +33,17 @@ async def lifespan(app: FastAPI):
     # Ensure upload directories exist
     PROFILE_PHOTOS_DIR.mkdir(parents=True, exist_ok=True)
     logger.info(f"✅ Upload directory ensured: {PROFILE_PHOTOS_DIR}")
+    
+    # Start background scheduler for automated tasks
+    start_scheduler()
+    
     logger.info("="*70)
     
     yield
     # Shutdown: cleanup if needed
     logger.info("="*70)
     logger.info("🛑 Shutting down Rekapo API Server")
+    stop_scheduler()
     logger.info("="*70)
 
 app = FastAPI(
@@ -60,6 +67,7 @@ app.include_router(transcribe_router, prefix="/api", tags=["Transcription"])
 app.include_router(auth_router, prefix="/api", tags=["Auth"])
 app.include_router(users_router, prefix="/api", tags=["Users"])
 app.include_router(sessions_router, prefix="/api", tags=["Sessions"])
+app.include_router(logs_router, prefix="/api", tags=["Logs"])
 app.include_router(admin_auth_router, tags=["Admin Auth"])
 app.include_router(admin_users_router, tags=["Admin Users"])
 app.include_router(admin_statistics_router, tags=["Admin Statistics"])

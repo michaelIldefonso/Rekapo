@@ -27,6 +27,7 @@ R2_PUBLIC_URL = os.getenv("R2_PUBLIC_URL", "")
 # R2 storage paths (prefixes for organizing files in bucket)
 R2_PROFILE_PHOTOS_PREFIX = "profile_photos"
 R2_AUDIO_PREFIX = "audios"
+R2_LOGS_PREFIX = "logs"
 
 # AI Model Paths
 WHISPER_MODEL_PATH = os.getenv("WHISPER_MODEL_PATH", "ai_models/whisper/models/whisper-small-fine-tuned-ct2")

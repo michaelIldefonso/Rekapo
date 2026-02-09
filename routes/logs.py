@@ -1,0 +1,383 @@
+import os
+import json
+import boto3
+from datetime import datetime, timedelta
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from typing import List, Optional
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+from db.db import get_db, User
+from routes.auth import get_current_user
+from admin.utils import get_current_admin
+from utils.utils import get_logger
+
+router = APIRouter()
+logger = get_logger(__name__)
+
+# Initialize R2 client (S3-compatible)
+try:
+    r2_client = boto3.client(
+        's3',
+        endpoint_url=os.getenv('R2_ENDPOINT_URL'),
+        aws_access_key_id=os.getenv('R2_ACCESS_KEY_ID'),
+        aws_secret_access_key=os.getenv('R2_SECRET_ACCESS_KEY'),
+        region_name=os.getenv('R2_REGION', 'auto')
+    )
+    logger.info("✓ R2 client initialized successfully")
+except Exception as e:
+    logger.warning("⚠️ R2 client initialization failed: %s", str(e))
+    r2_client = None
+
+BUCKET_NAME = os.getenv('R2_BUCKET_NAME', 'rekapo')
+
+
+class LogEntry(BaseModel):
+    level: str  # 'info', 'warn', 'error', 'network'
+    message: str
+    timestamp: str
+
+
+class LogBatch(BaseModel):
+    logs: List[LogEntry]
+    batch_timestamp: str
+
+
+@router.post("/logs/write")
+async def write_logs_to_r2(
+    log_batch: LogBatch,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Write logs to Cloudflare R2 bucket.
+    File path: logs/2026/02/09/user_123_14-30-00.json
+    """
+    if not r2_client:
+        logger.warning("R2 client not configured - logs not stored")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Log storage service not configured"
+        )
+    
+    try:
+        # Generate hierarchical path
+        now = datetime.now()
+        file_path = (
+            f"logs/{now.year}/{now.month:02d}/{now.day:02d}/"
+            f"user_{current_user.id}_{now.strftime('%H-%M-%S')}.json"
+        )
+        
+        # Prepare log data
+        log_data = {
+            "user_id": current_user.id,
+            "user_email": current_user.email,
+            "batch_timestamp": log_batch.batch_timestamp,
+            "logs": [
+                {
+                    "level": log.level,
+                    "message": log.message,
+                    "timestamp": log.timestamp
+                }
+                for log in log_batch.logs
+            ]
+        }
+        
+        # Upload to R2
+        r2_client.put_object(
+            Bucket=BUCKET_NAME,
+            Key=file_path,
+            Body=json.dumps(log_data, indent=2),
+            ContentType='application/json'
+        )
+        
+        logger.info("✓ Logs written to R2 - User: %s, File: %s, Count: %d", 
+                   current_user.id, file_path, len(log_batch.logs))
+        
+        return {
+            "status": "success",
+            "logs_written": len(log_batch.logs),
+            "file": file_path
+        }
+    
+    except Exception as e:
+        logger.error("Error writing logs to R2: %s", str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+            detail=f"Failed to write logs: {str(e)}"
+        )
+
+
+@router.get("/logs/files")
+async def list_log_files(
+    date: Optional[str] = Query(None, description="Filter by date (YYYY-MM-DD)"),
+    current_admin: User = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    List log files from R2 (admin only).
+    Optionally filter by date.
+    """
+    if not r2_client:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Log storage service not configured"
+        )
+    
+    try:
+        prefix = "logs/"
+        if date:
+            parts = date.split('-')
+            if len(parts) == 3:
+                prefix = f"logs/{parts[0]}/{parts[1]}/{parts[2]}/"
+        
+        response = r2_client.list_objects_v2(
+            Bucket=BUCKET_NAME,
+            Prefix=prefix
+        )
+        
+        files = []
+        if 'Contents' in response:
+            files = [
+                {
+                    "key": obj['Key'],
+                    "size": obj['Size'],
+                    "last_modified": obj['LastModified'].isoformat()
+                }
+                for obj in response['Contents']
+            ]
+            files.sort(key=lambda x: x['last_modified'], reverse=True)
+        
+        logger.info("✓ Listed %d log files (Admin: %s, Date filter: %s)", 
+                   len(files), current_admin.id, date or "none")
+        
+        return {"files": files, "count": len(files)}
+    
+    except Exception as e:
+        logger.error("Error listing log files: %s", str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@router.get("/logs/view/{file_path:path}")
+async def view_log_file(
+    file_path: str,
+    level: Optional[str] = Query(None, description="Filter by log level"),
+    current_admin: User = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    View contents of log file from R2 (admin only).
+    Optionally filter by log level.
+    """
+    if not r2_client:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Log storage service not configured"
+        )
+    
+    try:
+        response = r2_client.get_object(
+            Bucket=BUCKET_NAME,
+            Key=file_path
+        )
+        
+        log_data = json.loads(response['Body'].read())
+        
+        if level:
+            log_data['logs'] = [
+                log for log in log_data['logs'] 
+                if log['level'] == level
+            ]
+        
+        logger.info("✓ Viewed log file - Admin: %s, File: %s, Count: %d", 
+                   current_admin.id, file_path, len(log_data['logs']))
+        
+        return {
+            "file": file_path,
+            "user_id": log_data.get('user_id'),
+            "user_email": log_data.get('user_email'),
+            "batch_timestamp": log_data.get('batch_timestamp'),
+            "logs": log_data['logs'],
+            "count": len(log_data['logs'])
+        }
+    
+    except r2_client.exceptions.NoSuchKey:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Log file not found"
+        )
+    except Exception as e:
+        logger.error("Error viewing log file: %s", str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@router.get("/logs/errors/recent")
+async def get_recent_errors(
+    hours: int = Query(24, ge=1, le=168, description="Hours to look back (max 168 = 1 week)"),
+    current_admin: User = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Get all errors from last N hours (admin only).
+    Default: 24 hours, max: 7 days.
+    """
+    if not r2_client:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Log storage service not configured"
+        )
+    
+    try:
+        cutoff_time = datetime.now() - timedelta(hours=hours)
+        all_errors = []
+        
+        # Search in logs for the last N days (covering the hours requested)
+        days_to_check = (hours // 24) + 2  # Add buffer for timezone differences
+        
+        for day_offset in range(days_to_check):
+            check_date = datetime.now() - timedelta(days=day_offset)
+            date_prefix = f"logs/{check_date.year}/{check_date.month:02d}/{check_date.day:02d}/"
+            
+            response = r2_client.list_objects_v2(
+                Bucket=BUCKET_NAME,
+                Prefix=date_prefix
+            )
+            
+            if 'Contents' not in response:
+                continue
+            
+            for obj in response['Contents']:
+                # Skip files older than cutoff
+                if obj['LastModified'].replace(tzinfo=None) < cutoff_time:
+                    continue
+                
+                try:
+                    file_response = r2_client.get_object(
+                        Bucket=BUCKET_NAME,
+                        Key=obj['Key']
+                    )
+                    log_data = json.loads(file_response['Body'].read())
+                    
+                    for log in log_data.get('logs', []):
+                        if log['level'] == 'error':
+                            log_time = datetime.fromisoformat(log['timestamp'].replace('Z', '+00:00'))
+                            if log_time.replace(tzinfo=None) >= cutoff_time:
+                                all_errors.append({
+                                    "user_id": log_data.get('user_id'),
+                                    "user_email": log_data.get('user_email'),
+                                    "timestamp": log['timestamp'],
+                                    "message": log['message'],
+                                    "file": obj['Key']
+                                })
+                except Exception as e:
+                    logger.warning("Error processing log file %s: %s", obj['Key'], str(e))
+                    continue
+        
+        all_errors.sort(key=lambda x: x['timestamp'], reverse=True)
+        
+        logger.info("✓ Found %d recent errors (Admin: %s, Hours: %d)", 
+                   len(all_errors), current_admin.id, hours)
+        
+        return {
+            "errors": all_errors, 
+            "count": len(all_errors),
+            "hours": hours,
+            "cutoff_time": cutoff_time.isoformat()
+        }
+    
+    except Exception as e:
+        logger.error("Error retrieving recent errors: %s", str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@router.delete("/logs/cleanup")
+async def cleanup_old_logs(
+    days: int = Query(30, ge=1, le=365, description="Delete logs older than N days"),
+    current_admin: User = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Delete logs older than specified days from R2 (admin only).
+    Default: 30 days, max: 365 days.
+    """
+    if not r2_client:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Log storage service not configured"
+        )
+    
+    try:
+        cutoff_date = datetime.now() - timedelta(days=days)
+        
+        response = r2_client.list_objects_v2(
+            Bucket=BUCKET_NAME,
+            Prefix="logs/"
+        )
+        
+        deleted_count = 0
+        if 'Contents' in response:
+            for obj in response['Contents']:
+                if obj['LastModified'].replace(tzinfo=None) < cutoff_date:
+                    r2_client.delete_object(
+                        Bucket=BUCKET_NAME,
+                        Key=obj['Key']
+                    )
+                    deleted_count += 1
+        
+        logger.info("✓ Cleaned up %d old log files (Admin: %s, Days: %d, Cutoff: %s)", 
+                   deleted_count, current_admin.id, days, cutoff_date.date())
+        
+        return {
+            "deleted": deleted_count,
+            "days": days,
+            "cutoff_date": cutoff_date.isoformat()
+        }
+    
+    except Exception as e:
+        logger.error("Error cleaning up logs: %s", str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+def cleanup_old_logs_job():
+    """
+    Background job to cleanup logs older than 7 days.
+    Called by the scheduler in main.py.
+    """
+    if not r2_client:
+        logger.warning("[Cleanup Job] R2 client not configured - skipping log cleanup")
+        return
+    
+    try:
+        cutoff_date = datetime.now() - timedelta(days=7)
+        
+        response = r2_client.list_objects_v2(
+            Bucket=BUCKET_NAME,
+            Prefix="logs/"
+        )
+        
+        deleted_count = 0
+        if 'Contents' in response:
+            for obj in response['Contents']:
+                if obj['LastModified'].replace(tzinfo=None) < cutoff_date:
+                    r2_client.delete_object(
+                        Bucket=BUCKET_NAME,
+                        Key=obj['Key']
+                    )
+                    deleted_count += 1
+        
+        logger.info("[Cleanup Job] ✓ Deleted %d old log files (cutoff: %s)", 
+                   deleted_count, cutoff_date.date())
+    
+    except Exception as e:
+        logger.error("[Cleanup Job] Error cleaning up logs: %s", str(e))
