@@ -7,7 +7,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from datetime import datetime, timedelta
 from utils.utils import get_logger
 from db.db import SessionLocal
-from routes.logs import cleanup_old_logs_job
+from admin.admin_logs import cleanup_old_logs_job
 
 logger = get_logger(__name__)
 

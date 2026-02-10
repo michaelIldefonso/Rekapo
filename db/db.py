@@ -171,6 +171,29 @@ class SystemStatistics(Base):
     average_session_duration = Column(Float)
     calculated_at = Column(DateTime, nullable=False, server_default=func.now())
 
+class AppLog(Base):
+    __tablename__ = "app_logs"
+    __table_args__ = (
+        Index("idx_app_logs_user_id", "user_id"),
+        Index("idx_app_logs_level", "level"),
+        Index("idx_app_logs_timestamp", "timestamp"),
+        Index("idx_app_logs_user_timestamp", "user_id", "timestamp"),
+        {"comment": "Stores application logs from mobile apps"},
+    )
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    level = Column(String(20), nullable=False, comment="Log level: info, warn, error, network")
+    message = Column(Text, nullable=False)
+    timestamp = Column(DateTime, nullable=False, comment="Log timestamp from client")
+    batch_timestamp = Column(DateTime, nullable=True, comment="Batch submission timestamp")
+    app_version = Column(String(50), nullable=True)
+    platform = Column(String(50), nullable=True)
+    created_at = Column(DateTime, nullable=False, server_default=func.now())
+    
+    # Relationships
+    user = relationship("User", foreign_keys=[user_id])
+
 # Create all tables
 def init_db():
     # Create the uuid-ossp extension on PostgreSQL if available/needed

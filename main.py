@@ -14,6 +14,7 @@ from admin.admin_users import router as admin_users_router
 from admin.admin_statistics import router as admin_statistics_router
 from admin.admin_sessions import router as admin_sessions_router
 from admin.admin_user_analytics import router as admin_user_analytics_router
+from admin.admin_logs import router as admin_logs_router
 from db.db import init_db
 from config.config import PROFILE_PHOTOS_DIR
 from utils.scheduler import start_scheduler, stop_scheduler
@@ -73,6 +74,7 @@ app.include_router(admin_users_router, tags=["Admin Users"])
 app.include_router(admin_statistics_router, tags=["Admin Statistics"])
 app.include_router(admin_sessions_router, tags=["Admin Sessions"])
 app.include_router(admin_user_analytics_router, tags=["Admin User Analytics"])
+app.include_router(admin_logs_router, tags=["Admin Logs"])
 
 # Mount static files for serving uploaded profile photos
 from config.config import UPLOADS_DIR
