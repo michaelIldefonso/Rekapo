@@ -394,17 +394,31 @@ def cleanup_old_logs_job():
     """
     Background job to cleanup logs older than 7 days.
     Called by the scheduler in main.py.
+    Uses distributed lock to prevent duplicate execution across workers.
     """
     from db.db import SessionLocal
+    from sqlalchemy import text
+    import os
     
     db = SessionLocal()
     try:
+        # Acquire distributed lock (prevents duplicate execution)
+        if "postgresql" in str(db.bind.url):
+            lock_id = hash("log_cleanup") % 2147483647
+            result = db.execute(
+                text("SELECT pg_try_advisory_lock(:lock_id)"),
+                {"lock_id": lock_id}
+            )
+            if not result.scalar():
+                logger.info("[Cleanup Job] Skipped - another worker is running this job")
+                return
+        
         cutoff_date = datetime.now() - timedelta(days=7)
         deleted_count = db.query(AppLog).filter(AppLog.timestamp < cutoff_date).delete()
         db.commit()
         
-        logger.info("[Cleanup Job] ✓ Deleted %d old log entries (cutoff: %s)", 
-                   deleted_count, cutoff_date.date())
+        logger.info("[Cleanup Job] ✓ Deleted %d old log entries (cutoff: %s, worker: %d)", 
+                   deleted_count, cutoff_date.date(), os.getpid())
     
     except Exception as e:
         db.rollback()
