@@ -34,8 +34,31 @@ async def create_session(
     - **session_title**: Optional title for the meeting (defaults to "Untitled Meeting")
     
     Returns the created session with session_id and start_time.
+    
+    Note: Duplicate prevention - if user has a "recording" session created within the last 5 seconds,
+    returns that existing session instead of creating a duplicate (prevents double-tap issues).
     """
     try:
+        # Duplicate prevention: Check if user already has a recent "recording" session
+        # This prevents double-taps or network retries from creating duplicate sessions
+        from datetime import timedelta
+        recent_threshold = datetime.now() - timedelta(seconds=5)
+        
+        existing_session = db.query(DBSession).filter(
+            DBSession.user_id == current_user.id,
+            DBSession.status == "recording",
+            DBSession.created_at >= recent_threshold,
+            DBSession.is_deleted == False
+        ).order_by(DBSession.created_at.desc()).first()
+        
+        if existing_session:
+            logger.warning(
+                f"⚠️ Duplicate session creation prevented for user {current_user.id}. "
+                f"Returning existing session {existing_session.id} (created {(datetime.now() - existing_session.created_at).total_seconds():.1f}s ago)"
+            )
+            return SessionResponse.model_validate(existing_session)
+        
+        # No recent session found, create new one
         new_session = DBSession(
             user_id=current_user.id,
             session_title=request.session_title or "Untitled Meeting",
@@ -47,13 +70,13 @@ async def create_session(
         db.commit()
         db.refresh(new_session)
         
-        logger.info(f"User {current_user.id} created session {new_session.id}: '{new_session.session_title}'")
+        logger.info(f"✅ User {current_user.id} created session {new_session.id}: '{new_session.session_title}'")
         
         return SessionResponse.model_validate(new_session)
     
     except Exception as e:
         db.rollback()
-        logger.error(f"Error creating session for user {current_user.id}: {e}")
+        logger.error(f"❌ Error creating session for user {current_user.id}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create session"
