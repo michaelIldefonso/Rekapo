@@ -354,7 +354,7 @@ async def get_log_stats(
             "errors": error_count,
             "warnings": warn_count,
             "info": info_count,
-            "top_errors": [{"message": e.message, "count": e.count} for e in top_errors],
+            "top_errors": top_errors,  # Already formatted as dicts
             "top_error_users": [{"email": u.email, "count": u.count} for u in top_error_users]
         }
     
