@@ -139,16 +139,10 @@ async def get_training_session_data(
             detail="Access denied: User has not consented to training data usage"
         )
     
-    # Additional check: don't include deleted sessions in training data
-    if session['is_deleted']:
-        logger.warning("Training data access denied - Session is deleted - Session ID: %s", session_id)
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access denied: Deleted sessions cannot be used for training"
-        )
-    
-    logger.info("✓ Training data access granted - Session ID: %s, Segments: %s, Summaries: %s", 
-                session['id'], session['total_segments'], session['total_summaries'])
+    # Note: Deleted sessions ARE allowed for training if user has consented
+    # Soft delete is for UI cleanup, doesn't revoke training consent
+    logger.info("✓ Training data access granted - Session ID: %s, Segments: %s, Summaries: %s, Deleted: %s", 
+                session['id'], session['total_segments'], session['total_summaries'], session['is_deleted'])
     
     return SessionDetailedResponse(**session)
 

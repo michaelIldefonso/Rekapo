@@ -1,12 +1,13 @@
 """
 Background scheduler for automated tasks:
 - Daily statistics calculation at 2 AM
-- Log cleanup (30 days) at 3 AM daily
+- Log cleanup (7 days) at 3 AM daily
+- Soft-deleted sessions cleanup (15 days) at 4 AM daily
 """
 from apscheduler.schedulers.background import BackgroundScheduler
 from datetime import datetime, timedelta
 from utils.utils import get_logger
-from db.db import SessionLocal
+from db.db import SessionLocal, Session as DBSession
 from admin.admin_logs import cleanup_old_logs_job
 from sqlalchemy import text
 import os
@@ -84,6 +85,50 @@ def calculate_daily_statistics_job():
         db.close()
 
 
+def cleanup_deleted_sessions_job():
+    """
+    Background job to permanently delete soft-deleted sessions older than 15 days.
+    Runs daily at 4 AM.
+    Uses distributed lock to prevent duplicate execution across workers.
+    """
+    db = SessionLocal()
+    try:
+        # Acquire distributed lock (prevents duplicate execution)
+        if not acquire_job_lock(db, "session_cleanup"):
+            logger.info("[Session Cleanup] Skipped - another worker is running this job")
+            return
+        
+        # Calculate cutoff date (15 days ago)
+        cutoff_date = datetime.now() - timedelta(days=15)
+        
+        # Find sessions to delete
+        sessions_to_delete = db.query(DBSession).filter(
+            DBSession.is_deleted == True,
+            DBSession.deleted_at < cutoff_date
+        ).all()
+        
+        deleted_count = len(sessions_to_delete)
+        
+        if deleted_count > 0:
+            # Permanently delete sessions (CASCADE will handle related segments/summaries)
+            for session in sessions_to_delete:
+                db.delete(session)
+            
+            db.commit()
+            logger.info(
+                "[Session Cleanup] ✓ Permanently deleted %d soft-deleted sessions (cutoff: %s, worker: %d)",
+                deleted_count, cutoff_date.date(), WORKER_ID
+            )
+        else:
+            logger.info("[Session Cleanup] No old soft-deleted sessions to clean up")
+    
+    except Exception as e:
+        db.rollback()
+        logger.error("[Session Cleanup] Error cleaning up sessions: %s", str(e))
+    finally:
+        db.close()
+
+
 def start_scheduler():
     """
     Start the background scheduler with all scheduled jobs.
@@ -118,6 +163,18 @@ def start_scheduler():
         replace_existing=True
     )
     logger.info("✓ Scheduled: Log Cleanup at 3:00 AM (deletes logs >7 days old)")
+    
+    # Job 3: Cleanup old soft-deleted sessions at 4 AM
+    scheduler.add_job(
+        cleanup_deleted_sessions_job,
+        'cron',
+        hour=4,
+        minute=0,
+        id='session_cleanup',
+        name='Cleanup Deleted Sessions (15 days)',
+        replace_existing=True
+    )
+    logger.info("✓ Scheduled: Session Cleanup at 4:00 AM (permanently deletes soft-deleted sessions >15 days old)")
     
     # Start the scheduler
     scheduler.start()
