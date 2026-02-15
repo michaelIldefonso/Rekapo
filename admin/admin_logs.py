@@ -203,17 +203,17 @@ async def get_top_errors(
     try:
         cutoff_time = datetime.now() - timedelta(hours=hours)
         
-        top_errors = db.query(
-            func.substr(AppLog.message, 1, 200).label('message'),
+        top_errors_raw = db.query(
+            AppLog.message,
             func.count(AppLog.id).label('count')
         ).filter(
             and_(
                 AppLog.level == 'error',
                 AppLog.timestamp >= cutoff_time
             )
-        ).group_by(func.substr(AppLog.message, 1, 200)).order_by(func.count(AppLog.id).desc()).limit(limit).all()
+        ).group_by(AppLog.message).order_by(func.count(AppLog.id).desc()).limit(limit).all()
         
-        result = [{"message": e.message, "count": e.count} for e in top_errors]
+        result = [{"message": (e.message[:200] if e.message else 'Unknown'), "count": e.count} for e in top_errors_raw]
         
         logger.info("✓ Retrieved top %d errors (Admin: %s, Hours: %d)", 
                    len(result), current_admin.id, hours)
@@ -306,37 +306,54 @@ async def get_log_stats(
             func.sum(func.case((AppLog.level == 'info', 1), else_=0)).label('info')
         ).filter(AppLog.timestamp >= cutoff_time).first()
         
+        # Handle None values safely
+        total_logs = counts.total or 0 if counts else 0
+        error_count = counts.errors or 0 if counts else 0
+        warn_count = counts.warnings or 0 if counts else 0
+        info_count = counts.info or 0 if counts else 0
+        
         # Get top error messages
-        top_errors = db.query(
-            func.substr(AppLog.message, 1, 100).label('message'),
-            func.count(AppLog.id).label('count')
-        ).filter(
-            and_(
-                AppLog.level == 'error',
-                AppLog.timestamp >= cutoff_time
-            )
-        ).group_by(func.substr(AppLog.message, 1, 100)).order_by(func.count(AppLog.id).desc()).limit(5).all()
+        top_errors = []
+        if error_count > 0:
+            try:
+                # Use substring/substr depending on database, with proper grouping
+                message_col = func.substring(AppLog.message, 1, 100).label('message_truncated')
+                top_errors_raw = db.query(
+                    AppLog.message,
+                    func.count(AppLog.id).label('count')
+                ).filter(
+                    and_(
+                        AppLog.level == 'error',
+                        AppLog.timestamp >= cutoff_time
+                    )
+                ).group_by(AppLog.message).order_by(func.count(AppLog.id).desc()).limit(5).all()
+                top_errors = [{'message': e.message[:100] if e.message else 'Unknown', 'count': e.count} for e in top_errors_raw]
+            except Exception as e:
+                logger.warning("Failed to fetch top errors: %s", str(e))
+                top_errors = []
         
         # Get users with most errors
-        top_error_users = db.query(
-            User.email,
-            func.count(AppLog.id).label('count')
-        ).join(AppLog, User.id == AppLog.user_id).filter(
-            and_(
-                AppLog.level == 'error',
-                AppLog.timestamp >= cutoff_time
-            )
-        ).group_by(User.email).order_by(func.count(AppLog.id).desc()).limit(5).all()
+        top_error_users = []
+        if error_count > 0:
+            top_error_users = db.query(
+                User.email,
+                func.count(AppLog.id).label('count')
+            ).join(AppLog, User.id == AppLog.user_id).filter(
+                and_(
+                    AppLog.level == 'error',
+                    AppLog.timestamp >= cutoff_time
+                )
+            ).group_by(User.email).order_by(func.count(AppLog.id).desc()).limit(5).all()
         
         logger.info("✓ Retrieved log stats (Admin: %s, Hours: %d, Total: %d)", 
-                   current_admin.id, hours, counts.total)
+                   current_admin.id, hours, total_logs)
         
         return {
             "period_hours": hours,
-            "total_logs": counts.total or 0,
-            "errors": counts.errors or 0,
-            "warnings": counts.warnings or 0,
-            "info": counts.info or 0,
+            "total_logs": total_logs,
+            "errors": error_count,
+            "warnings": warn_count,
+            "info": info_count,
             "top_errors": [{"message": e.message, "count": e.count} for e in top_errors],
             "top_error_users": [{"email": u.email, "count": u.count} for u in top_error_users]
         }
