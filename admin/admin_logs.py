@@ -219,7 +219,7 @@ async def get_top_errors(
                    len(result), current_admin.id, hours)
         
         return {
-            "top_errors": result,
+            "errors": result,
             "count": len(result),
             "hours": hours
         }
@@ -263,7 +263,7 @@ async def get_top_error_users(
                 "user_id": u.id,
                 "email": u.email,
                 "name": u.name,
-                "error_count": u.error_count
+                "count": u.error_count
             } 
             for u in top_error_users
         ]
@@ -272,7 +272,7 @@ async def get_top_error_users(
                    len(result), current_admin.id, hours)
         
         return {
-            "top_error_users": result,
+            "users": result,
             "count": len(result),
             "hours": hours
         }
@@ -363,6 +363,89 @@ async def get_log_stats(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve log stats"
+        )
+
+
+@router.get("/admin/logs/search")
+async def search_logs(
+    user_id: Optional[int] = Query(None, description="Search by user ID"),
+    email: Optional[str] = Query(None, description="Search by user email (partial match)"),
+    hours: int = Query(24, ge=1, le=168, description="Hours to look back (max 168 = 1 week)"),
+    level: Optional[str] = Query(None, description="Filter by log level (info, warn, error, network)"),
+    limit: int = Query(100, ge=1, le=1000, description="Maximum number of logs to return"),
+    current_admin: User = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Unified search endpoint for logs (admin only).
+    Search by user_id OR email (at least one required).
+    Supports time range, level filtering, and result limit.
+    """
+    try:
+        # Require at least one search parameter
+        if not user_id and not email:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Please provide either user_id or email to search"
+            )
+        
+        cutoff_time = datetime.now() - timedelta(hours=hours)
+        
+        # Build query with user join
+        query = db.query(AppLog, User.email, User.name).join(User, AppLog.user_id == User.id).filter(
+            AppLog.timestamp >= cutoff_time
+        )
+        
+        # Apply user filters
+        if user_id:
+            query = query.filter(AppLog.user_id == user_id)
+        elif email:
+            query = query.filter(func.lower(User.email).contains(email.lower()))
+        
+        # Apply level filter
+        if level:
+            query = query.filter(AppLog.level == level)
+        
+        # Get results
+        logs = query.order_by(AppLog.timestamp.desc()).limit(limit).all()
+        
+        result = [
+            {
+                "id": log.AppLog.id,
+                "user_id": log.AppLog.user_id,
+                "user_email": log.email,
+                "user_name": log.name,
+                "timestamp": log.AppLog.timestamp.isoformat(),
+                "level": log.AppLog.level,
+                "message": log.AppLog.message,
+                "app_version": log.AppLog.app_version,
+                "platform": log.AppLog.platform
+            }
+            for log in logs
+        ]
+        
+        logger.info("✓ Search found %d logs (Admin: %s, User ID: %s, Email: %s, Hours: %d)", 
+                   len(result), current_admin.id, user_id or "none", email or "none", hours)
+        
+        return {
+            "logs": result,
+            "count": len(result),
+            "search_params": {
+                "user_id": user_id,
+                "email": email,
+                "hours": hours,
+                "level": level,
+                "limit": limit
+            }
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Error searching logs: %s", str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to search logs"
         )
 
 
