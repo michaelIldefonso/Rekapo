@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from typing import Optional
 from sqlalchemy.orm import Session
-from sqlalchemy import func, and_
+from sqlalchemy import func, and_, case
 from db.db import get_db, User, AppLog
 from admin.utils import get_current_admin
 from utils.utils import get_logger
@@ -30,9 +30,9 @@ async def get_log_summary(
         query = db.query(
             func.date(AppLog.timestamp).label('date'),
             func.count(AppLog.id).label('total'),
-            func.sum(func.case((AppLog.level == 'error', 1), else_=0)).label('errors'),
-            func.sum(func.case((AppLog.level == 'warn', 1), else_=0)).label('warnings'),
-            func.sum(func.case((AppLog.level == 'info', 1), else_=0)).label('info')
+            func.sum(case([(AppLog.level == 'error', 1)], else_=0)).label('errors'),
+            func.sum(case([(AppLog.level == 'warn', 1)], else_=0)).label('warnings'),
+            func.sum(case([(AppLog.level == 'info', 1)], else_=0)).label('info')
         )
         
         if date:
@@ -301,9 +301,9 @@ async def get_log_stats(
         # Get total counts by level
         counts = db.query(
             func.count(AppLog.id).label('total'),
-            func.sum(func.case((AppLog.level == 'error', 1), else_=0)).label('errors'),
-            func.sum(func.case((AppLog.level == 'warn', 1), else_=0)).label('warnings'),
-            func.sum(func.case((AppLog.level == 'info', 1), else_=0)).label('info')
+            func.sum(case([(AppLog.level == 'error', 1)], else_=0)).label('errors'),
+            func.sum(case([(AppLog.level == 'warn', 1)], else_=0)).label('warnings'),
+            func.sum(case([(AppLog.level == 'info', 1)], else_=0)).label('info')
         ).filter(AppLog.timestamp >= cutoff_time).first()
         
         # Handle None values safely
