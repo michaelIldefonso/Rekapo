@@ -10,16 +10,22 @@ from pathlib import Path
 from datetime import datetime
 from contextlib import asynccontextmanager
 
-# Use Modal deployed functions for serverless GPU inference
-from ai_models.modal_client import transcribe_audio_file, translate_text, summarize_transcriptions, clear_summarizer_cache
-# Local inference fallback (comment out Modal above if needed):
-# from ai_models.whisper.inference import transcribe_audio_file
-# from ai_models.translator.inference import auto_detect_and_translate, translate_text
-# from ai_models.summarizer.inference import summarize_transcriptions, clear_summarizer_cache
+# Dynamic import based on USE_MODAL config
+from config.config import USE_MODAL
+
+if USE_MODAL:
+    # Use Modal deployed functions for serverless GPU inference
+    from ai_models.modal_client import transcribe_audio_file, translate_text, summarize_transcriptions, clear_summarizer_cache
+else:
+    # Use local inference models
+    from ai_models.whisper.inference import transcribe_audio_file
+    from ai_models.translator.inference import translate_text
+    from ai_models.summarizer.inference import summarize_transcriptions, clear_summarizer_cache
+
 from services.services import ConnectionManager
 from db.db import get_db, RecordingSegment, Summary, Session as DBSession, SessionLocal
 from schemas.schemas import AudioChunkMessage, TranscriptionResponse
-from config.config import R2_ENABLED, R2_AUDIO_PREFIX, ENABLE_TAGLISH_PREPROCESSING
+from config.config import R2_ENABLED, R2_AUDIO_PREFIX, ENABLE_TAGLISH_PREPROCESSING, USE_MODAL
 from storage.storage import r2_client
 from utils.utils import get_logger
 
@@ -87,8 +93,10 @@ def log_to_mobile(message_type: str, data: dict, session_id: str = None):
         error = data.get('message', '')
         logger.error(f"📱 Error sent to mobile: {error}")
 
-# Log active translation configuration
+# Log active AI inference and translation configuration
 logger.info("=" * 70)
+logger.info("🤖 AI Inference Mode")
+logger.info(f"   Using: {'Modal (Serverless GPU)' if USE_MODAL else 'Local Models'}")
 logger.info("🌐 Translation Configuration")
 logger.info(f"   Model: NLLB-200")
 logger.info(f"   Taglish Preprocessing: {'ENABLED' if ENABLE_TAGLISH_PREPROCESSING else 'DISABLED'}")

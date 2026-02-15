@@ -34,6 +34,10 @@ WHISPER_MODEL_PATH = os.getenv("WHISPER_MODEL_PATH", "ai_models/whisper/models/w
 TRANSLATOR_MODEL_PATH = os.getenv("TRANSLATOR_MODEL_PATH", "ai_models/translator/nllb-1.3b-ct2")
 SUMMARIZER_MODEL_PATH = os.getenv("SUMMARIZER_MODEL_PATH", "Qwen/Qwen2.5-1.5B-Instruct")
 
+# AI Inference Configuration
+# Use Modal for serverless GPU inference (true) or local models (false)
+USE_MODAL = os.getenv("USE_MODAL", "true").lower() == "true"
+
 # Translation Configuration
 # Preprocessing for Taglish (applies phonetic correction, dictionary lookup, context analysis)
 ENABLE_TAGLISH_PREPROCESSING = os.getenv("ENABLE_TAGLISH_PREPROCESSING", "true").lower() == "true"
