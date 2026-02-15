@@ -76,19 +76,30 @@ async def get_log_summary(
 @router.get("/admin/logs/recent")
 async def get_recent_logs(
     limit: int = Query(100, ge=1, le=1000, description="Number of logs to retrieve"),
-    level: Optional[str] = Query(None, description="Filter by log level"),
+    level: Optional[str] = Query(None, description="Filter by log level (info, warn, error, network)"),
+    hours: int = Query(24, ge=1, le=168, description="Time range in hours (default: 24, max: 168 = 7 days)"),
+    user_email: Optional[str] = Query(None, description="Filter by user email"),
     current_admin: User = Depends(get_current_admin),
     db: Session = Depends(get_db)
 ):
     """
-    Get recent logs from database (admin only).
-    Optionally filter by log level.
+    Get recent logs from database with flexible filtering (admin only).
+    Supports filtering by: time range, log level, user email, and limit.
     """
     try:
-        query = db.query(AppLog, User.email).join(User, AppLog.user_id == User.id)
+        cutoff_time = datetime.now() - timedelta(hours=hours)
         
+        query = db.query(AppLog, User.email).join(User, AppLog.user_id == User.id).filter(
+            AppLog.timestamp >= cutoff_time
+        )
+        
+        # Apply level filter
         if level:
             query = query.filter(AppLog.level == level)
+        
+        # Apply email filter
+        if user_email:
+            query = query.filter(func.lower(User.email).contains(user_email.lower()))
         
         logs = query.order_by(AppLog.timestamp.desc()).limit(limit).all()
         
@@ -106,10 +117,19 @@ async def get_recent_logs(
             for log in logs
         ]
         
-        logger.info("✓ Retrieved %d recent logs (Admin: %s, Level: %s)", 
-                   len(result), current_admin.id, level or "all")
+        logger.info("✓ Retrieved %d recent logs (Admin: %s, Level: %s, Hours: %d, Email: %s)", 
+                   len(result), current_admin.id, level or "all", hours, user_email or "all")
         
-        return {"logs": result, "count": len(result)}
+        return {
+            "logs": result, 
+            "count": len(result),
+            "filters": {
+                "hours": hours,
+                "level": level,
+                "user_email": user_email,
+                "limit": limit
+            }
+        }
     
     except Exception as e:
         logger.error("Error getting recent logs: %s", str(e))
@@ -166,6 +186,102 @@ async def get_recent_errors(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve recent errors"
+        )
+
+
+@router.get("/admin/logs/top-errors")
+async def get_top_errors(
+    hours: int = Query(24, ge=1, le=168, description="Hours to look back (max 168 = 1 week)"),
+    limit: int = Query(10, ge=1, le=50, description="Number of top errors to return"),
+    current_admin: User = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Get top error messages by frequency (admin only).
+    Returns most common error messages in the specified time range.
+    """
+    try:
+        cutoff_time = datetime.now() - timedelta(hours=hours)
+        
+        top_errors = db.query(
+            func.substr(AppLog.message, 1, 200).label('message'),
+            func.count(AppLog.id).label('count')
+        ).filter(
+            and_(
+                AppLog.level == 'error',
+                AppLog.timestamp >= cutoff_time
+            )
+        ).group_by(func.substr(AppLog.message, 1, 200)).order_by(func.count(AppLog.id).desc()).limit(limit).all()
+        
+        result = [{"message": e.message, "count": e.count} for e in top_errors]
+        
+        logger.info("✓ Retrieved top %d errors (Admin: %s, Hours: %d)", 
+                   len(result), current_admin.id, hours)
+        
+        return {
+            "top_errors": result,
+            "count": len(result),
+            "hours": hours
+        }
+    
+    except Exception as e:
+        logger.error("Error retrieving top errors: %s", str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve top errors"
+        )
+
+
+@router.get("/admin/logs/top-error-users")
+async def get_top_error_users(
+    hours: int = Query(24, ge=1, le=168, description="Hours to look back (max 168 = 1 week)"),
+    limit: int = Query(10, ge=1, le=50, description="Number of top users to return"),
+    current_admin: User = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Get users with most errors (admin only).
+    Returns users who have generated the most errors in the specified time range.
+    """
+    try:
+        cutoff_time = datetime.now() - timedelta(hours=hours)
+        
+        top_error_users = db.query(
+            User.id,
+            User.email,
+            User.name,
+            func.count(AppLog.id).label('error_count')
+        ).join(AppLog, User.id == AppLog.user_id).filter(
+            and_(
+                AppLog.level == 'error',
+                AppLog.timestamp >= cutoff_time
+            )
+        ).group_by(User.id, User.email, User.name).order_by(func.count(AppLog.id).desc()).limit(limit).all()
+        
+        result = [
+            {
+                "user_id": u.id,
+                "email": u.email,
+                "name": u.name,
+                "error_count": u.error_count
+            } 
+            for u in top_error_users
+        ]
+        
+        logger.info("✓ Retrieved top %d error users (Admin: %s, Hours: %d)", 
+                   len(result), current_admin.id, hours)
+        
+        return {
+            "top_error_users": result,
+            "count": len(result),
+            "hours": hours
+        }
+    
+    except Exception as e:
+        logger.error("Error retrieving top error users: %s", str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve top error users"
         )
 
 
