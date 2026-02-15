@@ -30,9 +30,9 @@ async def get_log_summary(
         query = db.query(
             func.date(AppLog.timestamp).label('date'),
             func.count(AppLog.id).label('total'),
-            func.sum(case([(AppLog.level == 'error', 1)], else_=0)).label('errors'),
-            func.sum(case([(AppLog.level == 'warn', 1)], else_=0)).label('warnings'),
-            func.sum(case([(AppLog.level == 'info', 1)], else_=0)).label('info')
+            func.sum(case((AppLog.level == 'error', 1), else_=0)).label('errors'),
+            func.sum(case((AppLog.level == 'warn', 1), else_=0)).label('warnings'),
+            func.sum(case((AppLog.level == 'info', 1), else_=0)).label('info')
         )
         
         if date:
@@ -301,9 +301,9 @@ async def get_log_stats(
         # Get total counts by level
         counts = db.query(
             func.count(AppLog.id).label('total'),
-            func.sum(case([(AppLog.level == 'error', 1)], else_=0)).label('errors'),
-            func.sum(case([(AppLog.level == 'warn', 1)], else_=0)).label('warnings'),
-            func.sum(case([(AppLog.level == 'info', 1)], else_=0)).label('info')
+            func.sum(case((AppLog.level == 'error', 1), else_=0)).label('errors'),
+            func.sum(case((AppLog.level == 'warn', 1), else_=0)).label('warnings'),
+            func.sum(case((AppLog.level == 'info', 1), else_=0)).label('info')
         ).filter(AppLog.timestamp >= cutoff_time).first()
         
         # Handle None values safely
