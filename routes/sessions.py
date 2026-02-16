@@ -324,23 +324,8 @@ async def get_session_details(
     # Commit any timestamp fixes
     db.commit()
     
-    # Check if completed session needs a final summary (for old recordings)
-    has_final_summary = any(s.is_final_summary for s in summaries)
-    if session.status == "completed" and not has_final_summary and len(recording_segments) > 0:
-        logger.info(f"Session {session_id} completed but has no final summary - triggering generation")
-        
-        # Define background task function
-        def generate_summary_background():
-            try:
-                logger.info(f"📝 Generating missing final summary for old session {session_id}...")
-                generate_session_summary_logic(session_id)
-                logger.info(f"✅ Final summary generated for old session {session_id}")
-            except Exception as e:
-                logger.error(f"❌ Failed to generate final summary for session {session_id}: {e}")
-        
-        # Add to FastAPI background tasks (runs after response is sent)
-        background_tasks.add_task(generate_summary_background)
-        logger.info(f"⚡ Final summary generation queued for old session {session_id}")
+    # Note: Final summary generation happens automatically on WebSocket disconnect
+    # If needed, users can manually trigger via POST /sessions/{id}/generate-summary endpoint
     
     # Calculate total duration from segments (if available)
     total_duration = None
