@@ -642,18 +642,28 @@ async def websocket_transcribe(websocket: WebSocket):
                             # Get all transcriptions for this session
                             transcriptions = manager.get_transcriptions(session_id)
                             logger.info(f"📚 Fetched {len(transcriptions)} transcriptions for session {session_id}")
-                            logger.info(f"📝 Summarizing last 10 chunks (segments {segment_number-9} to {segment_number})...")
-                            
+
+                            # Determine the exact transcriptions we'll summarize (last up to 10)
+                            included_transcriptions = transcriptions[-10:]
+                            if included_transcriptions:
+                                start_segment = included_transcriptions[0].get("segment_number")
+                                end_segment = included_transcriptions[-1].get("segment_number")
+                            else:
+                                start_segment = segment_number - 9
+                                end_segment = segment_number
+
+                            logger.info(f"📝 Summarizing {len(included_transcriptions)} chunk(s) (segments {start_segment} to {end_segment})...")
+
                             # Run heavy summarization in thread pool to not block event loop
                             import asyncio
                             from concurrent.futures import ThreadPoolExecutor
-                            
+
                             loop = asyncio.get_event_loop()
                             with ThreadPoolExecutor() as executor:
                                 summary_result = await loop.run_in_executor(
                                     executor,
                                     lambda: summarize_transcriptions(
-                                        transcriptions=transcriptions[-10:],
+                                        transcriptions=included_transcriptions,
                                         device="cuda",
                                         max_length=300,
                                         min_length=75
@@ -666,10 +676,10 @@ async def websocket_transcribe(websocket: WebSocket):
                             # Send summary to client
                             summary_msg = {
                                 "status": "summary",
-                                "message": f"Summary generated for chunks {segment_number-9} to {segment_number}",
+                                "message": f"Summary generated for chunks {start_segment} to {end_segment}",
                                 "session_id": session_id,
                                 "summary": summary_result["summary"],
-                                "chunk_count": summary_result["chunk_count"],
+                                "chunk_count": len(included_transcriptions),
                                 "is_summary": True
                             }
                             
@@ -691,14 +701,14 @@ async def websocket_transcribe(websocket: WebSocket):
                             try:
                                 summary = Summary(
                                     session_id=session_id,
-                                    chunk_range_start=segment_number - 9,
-                                    chunk_range_end=segment_number,
+                                    chunk_range_start=start_segment,
+                                    chunk_range_end=end_segment,
                                     summary_text=summary_result["summary"],
-                                    is_final_summary=False  # Intermediate summary (real-time)
+                                    is_final_summary=False  # Intermediate summary (final Summary will be generated on disconnect)
                                 )
                                 db_summary.add(summary)
                                 db_summary.commit()
-                                logger.info(f"💾 Summary saved to database - Session: {session_id}, Range: {segment_number-9}-{segment_number}")
+                                logger.info(f"💾 Summary saved to database - Session: {session_id}, Range: {start_segment}-{end_segment}")
                             except Exception as e:
                                 logger.error(f"❌ Summary database save error - Session: {session_id}, Error: {e}")
                                 db_summary.rollback()
