@@ -818,6 +818,32 @@ async def websocket_transcribe(websocket: WebSocket):
                         logger.info(f"Session {current_session_id} auto-updated to '{session.status}' on disconnect ({segment_count} segments)")
                     else:
                         logger.warning(f"⚠️ Session {current_session_id} already in '{session.status}' status, skipping update")
+                        # Ensure final summary is generated if not present
+                        from routes.sessions import generate_session_summary_logic
+                        try:
+                            db_summary_check = SessionLocal()
+                            from db.db import Summary
+                            existing_final = db_summary_check.query(Summary).filter(
+                                Summary.session_id == current_session_id,
+                                Summary.is_final_summary == True
+                            ).first()
+                            if not existing_final:
+                                import threading
+                                def generate_final_summary_background():
+                                    try:
+                                        logger.info(f"📝 Generating final summary for session {current_session_id} (late trigger)...")
+                                        generate_session_summary_logic(current_session_id)
+                                        logger.info(f"✅ Final summary generated and saved for session {current_session_id} (late trigger)")
+                                    except Exception as e:
+                                        logger.error(f"❌ Failed to generate final summary for session {current_session_id} (late trigger): {e}")
+                                thread = threading.Thread(target=generate_final_summary_background, daemon=True)
+                                thread.start()
+                                logger.info(f"⚡ Final summary generation triggered in background thread (late trigger) - Session: {current_session_id}")
+                        except Exception as e:
+                            logger.error(f"❌ Error checking/generating late final summary for session {current_session_id}: {e}")
+                        finally:
+                            if 'db_summary_check' in locals():
+                                db_summary_check.close()
             except Exception as e:
                 logger.error(f"❌ Failed to update session status on disconnect: {e}")
                 import traceback
