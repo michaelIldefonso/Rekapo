@@ -696,17 +696,19 @@ async def websocket_transcribe(websocket: WebSocket):
                             except Exception as e:
                                 logger.warning(f"⚠️ Client disconnected, summary not sent but will be saved to DB - Session: {session_id}")
                             
-                            # Save summary to database
+                            # Save summary to database (import model locally to avoid scope/closure issues)
                             db_summary = SessionLocal()
                             try:
-                                summary = Summary(
+                                from db.db import Summary as SummaryModel
+
+                                summary_obj = SummaryModel(
                                     session_id=session_id,
                                     chunk_range_start=start_segment,
                                     chunk_range_end=end_segment,
                                     summary_text=summary_result["summary"],
                                     is_final_summary=False  # Intermediate summary (final Summary will be generated on disconnect)
                                 )
-                                db_summary.add(summary)
+                                db_summary.add(summary_obj)
                                 db_summary.commit()
                                 logger.info(f"💾 Summary saved to database - Session: {session_id}, Range: {start_segment}-{end_segment}")
                             except Exception as e:
