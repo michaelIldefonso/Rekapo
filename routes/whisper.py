@@ -289,6 +289,30 @@ async def websocket_transcribe(websocket: WebSocket):
             
             try:
                 message = json.loads(data)
+
+                # Explicit finalize handshake from mobile client.
+                # This is sent only after client flushes pending chunks.
+                if message.get("action") == "finalize":
+                    finalize_session_id = message.get("session_id", current_session_id)
+                    logger.info(f"🏁 Finalize requested - Session: {finalize_session_id}")
+
+                    finalizing_msg = {
+                        "status": "finalizing",
+                        "message": "Finalizing session and preparing disconnect",
+                        "session_id": finalize_session_id
+                    }
+                    await websocket.send_json(finalizing_msg)
+
+                    finalized_msg = {
+                        "status": "finalized",
+                        "message": "All received segments processed. Closing connection.",
+                        "session_id": finalize_session_id
+                    }
+                    await websocket.send_json(finalized_msg)
+
+                    # Trigger disconnect cleanup path (session completion + final summary generation).
+                    await websocket.close(code=1000, reason="finalized")
+                    break
                 
                 # Validate required fields
                 if "session_id" not in message:
@@ -760,6 +784,10 @@ async def websocket_transcribe(websocket: WebSocket):
                 }
                 log_to_mobile("error", error_msg)
                 await websocket.send_json(error_msg)
+
+        # while loop exited via break (finalize path) — trigger the same
+        # session-completion and final-summary cleanup as a normal disconnect.
+        raise WebSocketDisconnect(code=1000)
     
     except WebSocketDisconnect:
         manager.disconnect(websocket)
