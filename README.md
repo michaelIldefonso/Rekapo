@@ -2,7 +2,7 @@
 
 > Mobile-based near real-time meeting summarizer with Taglish (Tagalog + English) support.
 
-Rekapo is a FastAPI backend that transcribes, translates, and summarizes meeting audio in near real-time. It is built for a mobile-first workflow — audio chunks are streamed from a mobile app over WebSocket, transcribed using a fine-tuned Whisper model, translated with NLLB-1.3B, and summarized using a BART/Qwen LLM. AI inference can run locally or on serverless GPUs via [Modal](https://modal.com).
+Rekapo is a FastAPI backend that transcribes, translates, and summarizes meeting audio in near real-time. It is built for a mobile-first workflow — audio chunks are streamed from a mobile app over WebSocket, transcribed using a fine-tuned Whisper model, translated with NLLB-1.3B, and summarized using a Qwen LLM. AI inference can run locally or on serverless GPUs via [Modal](https://modal.com).
 
 ---
 
@@ -13,7 +13,7 @@ Rekapo is a FastAPI backend that transcribes, translates, and summarizes meeting
 - 🔊 **VAD-based audio segmentation** for accurate silence detection
 - 🇵🇭 **Taglish support** — phonetic correction, dictionary lookup, and context analysis for Tagalog/English mixed speech
 - 📝 **Meeting session management** — create, update, complete, and replay sessions
-- 🤖 **AI summarization** — BART model (local) or Qwen via Modal (serverless GPU)
+- 🤖 **AI summarization** — Qwen via Modal (serverless GPU)
 - 🌍 **Translation** — NLLB-200 1.3B model
 - ☁️ **Cloudflare R2 storage** — optional cloud storage for audio and logs
 - 👤 **Google OAuth** — sign in with Google on mobile
@@ -32,7 +32,7 @@ Rekapo is a FastAPI backend that transcribes, translates, and summarizes meeting
 | Auth | Google OAuth 2.0 + JWT |
 | Transcription | faster-whisper (fine-tuned Whisper) |
 | Translation | NLLB-200-1.3B (CTranslate2) |
-| Summarization | BART (local) / Qwen 2.5 (Modal) |
+| Summarization | Qwen 2.5 (Modal) |
 | Serverless GPU | Modal |
 | Object Storage | Cloudflare R2 (optional) |
 | Background Jobs | APScheduler |
@@ -62,7 +62,7 @@ Rekapo/
 ├── ai_models/
 │   ├── whisper/inference.py        # Local Whisper inference
 │   ├── translator/inference.py     # Local NLLB translation
-│   ├── summarizer/inference.py     # Local BART summarization
+│   ├── summarizer/inference.py     # QWEN 2.5
 │   ├── modal_client.py             # Modal serverless GPU client
 │   └── preprocessing/taglish.py   # Taglish preprocessing pipeline
 ├── db/
