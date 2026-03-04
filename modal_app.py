@@ -137,7 +137,7 @@ def transcribe_audio(
 
 @app.function(
     image=base_image,
-    gpu="T4",  # int8 CT2 works great on T4
+    gpu="T4",  # float16 CT2 on T4
     volumes={"/models/nllb": nllb_volume},
     secrets=[modal.Secret.from_name("huggingface")],  # Add HF token for model download
     timeout=300,  # 5 minutes max
@@ -174,8 +174,8 @@ def translate_text(
         cache_dir="/models/nllb",
     )
     
-    # Load translator with int8 compute type for maximum efficiency
-    translator = ctranslate2.Translator(model_path, device="cuda", compute_type="int8")
+    # Load translator with float16 compute type for better accuracy
+    translator = ctranslate2.Translator(model_path, device="cuda", compute_type="float16")
     
     # Load tokenizer from HuggingFace
     tokenizer = AutoTokenizer.from_pretrained("facebook/nllb-200-1.3B")
