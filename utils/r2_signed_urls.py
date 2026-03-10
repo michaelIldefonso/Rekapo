@@ -13,7 +13,7 @@ import boto3
 from botocore.config import Config
 from botocore.exceptions import ClientError
 from config.config import (
-    R2_ENDPOINT,
+    R2_ENDPOINT_URL,
     R2_ACCESS_KEY_ID,
     R2_SECRET_ACCESS_KEY,
     R2_BUCKET_NAME,
@@ -36,7 +36,7 @@ def get_r2_client():
     
     return boto3.client(
         's3',
-        endpoint_url=R2_ENDPOINT,
+        endpoint_url=R2_ENDPOINT_URL,
         aws_access_key_id=R2_ACCESS_KEY_ID,
         aws_secret_access_key=R2_SECRET_ACCESS_KEY,
         config=Config(signature_version='s3v4'),
