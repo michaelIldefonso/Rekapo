@@ -5,8 +5,58 @@ from typing import Optional, Tuple, List, Dict, Any
 from datetime import datetime, date, timedelta
 from db.db import User, SystemStatistics, Session as SessionModel, RecordingSegment, Summary
 from utils.utils import get_logger
+from config.config import R2_ENABLED
 
 logger = get_logger(__name__)
+
+# Import signed URL generator for R2 audio access
+try:
+    from utils.r2_signed_urls import generate_signed_url
+except ImportError:
+    logger.warning("R2 signed URLs not available")
+    generate_signed_url = None
+
+
+def _add_signed_url_to_segment(segment: RecordingSegment) -> dict:
+    """
+    Convert segment to dict and add signed URL for admin panel access.
+    Handles both old (public URL) and new (r2:// URI) formats.
+    """
+    segment_dict = {
+        'id': segment.id,
+        'session_id': segment.session_id,
+        'segment_number': segment.segment_number,
+        'audio_path': segment.audio_path,
+        'transcript_text': segment.transcript_text,
+        'english_translation': segment.english_translation,
+        'rating': segment.rating,
+        'created_at': segment.created_at
+    }
+    
+    # Generate signed URL for R2 audio files (1 hour expiration)
+    if R2_ENABLED and generate_signed_url and segment.audio_path:
+        try:
+            from urllib.parse import urlparse
+            
+            # Handle both old and new formats
+            if segment.audio_path.startswith("r2://"):
+                # New format: r2://bucket/audios/session_X/segment_Y.wav
+                r2_key = segment.audio_path.split("/", 3)[-1]
+            elif "r2.dev" in segment.audio_path or segment.audio_path.startswith("http"):
+                # Old format: https://pub-xxx.r2.dev/audios/session_X/segment_Y.wav
+                parsed = urlparse(segment.audio_path)
+                r2_key = parsed.path.lstrip("/")
+            else:
+                # Assume it's already just the key
+                r2_key = segment.audio_path
+            
+            # Generate signed URL valid for 1 hour and expose it via existing field
+            segment_dict['audio_path'] = generate_signed_url(r2_key, expiration_seconds=3600)
+            logger.debug(f"[Admin] Generated signed URL for segment {segment.id}")
+        except Exception as e:
+            logger.error(f"[Admin] Failed to generate signed URL for segment {segment.id}: {e}")
+    
+    return segment_dict
 
 
 class AdminSessionService:
@@ -189,7 +239,7 @@ class AdminSessionService:
                 'username': user.username,
                 'data_usage_consent': bool(user.data_usage_consent) if user.data_usage_consent is not None else True
             },
-            'recording_segments': segments,
+            'recording_segments': [_add_signed_url_to_segment(seg) for seg in segments],
             'summaries': summaries,
             'total_segments': len(segments),
             'total_summaries': len(summaries),

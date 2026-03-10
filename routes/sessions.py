@@ -38,7 +38,7 @@ def _add_signed_url_to_segment(segment: RecordingSegment) -> SessionRecordingSeg
         segment: RecordingSegment database model
     
     Returns:
-        SessionRecordingSegmentResponse with signed URL (if R2 enabled)
+        SessionRecordingSegmentResponse with audio_path replaced by signed URL (if R2 enabled)
     """
     # Convert to response model
     response = SessionRecordingSegmentResponse.model_validate(segment)
@@ -61,12 +61,12 @@ def _add_signed_url_to_segment(segment: RecordingSegment) -> SessionRecordingSeg
                 # Assume it's already just the key
                 r2_key = segment.audio_path
             
-            # Generate signed URL valid for 1 hour
-            response.audio_url = generate_signed_url(r2_key, expiration_seconds=3600)
+            # Generate signed URL valid for 1 hour and expose it via existing field
+            response.audio_path = generate_signed_url(r2_key, expiration_seconds=3600)
             logger.debug(f"Generated signed URL for segment {segment.id} (key: {r2_key[:50]}...)")
         except Exception as e:
             logger.error(f"Failed to generate signed URL for segment {segment.id}: {e}")
-            response.audio_url = None  # Graceful fallback
+            # Keep original audio_path on failure
     
     return response
 

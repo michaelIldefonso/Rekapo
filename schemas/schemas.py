@@ -184,8 +184,7 @@ class DataUsageConsentResponse(BaseModel):
 class SessionRecordingSegmentResponse(BaseModel):
     id: int
     segment_number: int
-    audio_path: str  # R2 key or local path
-    audio_url: Optional[str] = None  # Time-limited signed URL for secure access
+    audio_path: str
     transcript_text: Optional[str] = None
     english_translation: Optional[str] = None
     rating: Optional[int] = None
