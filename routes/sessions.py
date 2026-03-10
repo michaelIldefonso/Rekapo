@@ -32,6 +32,7 @@ logger = get_logger(__name__)
 def _add_signed_url_to_segment(segment: RecordingSegment) -> SessionRecordingSegmentResponse:
     """
     Add time-limited signed URL to recording segment for secure audio access.
+    Handles both old (public URL) and new (r2:// URI) formats.
     
     Args:
         segment: RecordingSegment database model
@@ -43,14 +44,26 @@ def _add_signed_url_to_segment(segment: RecordingSegment) -> SessionRecordingSeg
     response = SessionRecordingSegmentResponse.model_validate(segment)
     
     # Generate signed URL for R2 audio files (1 hour expiration)
-    if R2_ENABLED and segment.audio_path and segment.audio_path.startswith("r2://"):
+    if R2_ENABLED and segment.audio_path:
         try:
-            # Extract R2 key from r2://bucket/key format
-            r2_key = segment.audio_path.split("/", 3)[-1]  # Gets "key" from "r2://bucket/key"
+            # Handle both old and new formats
+            if segment.audio_path.startswith("r2://"):
+                # New format: r2://bucket/audios/session_X/segment_Y.wav
+                r2_key = segment.audio_path.split("/", 3)[-1]  # Gets "audios/session_X/segment_Y.wav"
+            elif "r2.dev" in segment.audio_path or segment.audio_path.startswith("http"):
+                # Old format: https://pub-xxx.r2.dev/audios/session_X/segment_Y.wav
+                # Extract key from URL path (everything after domain)
+                from urllib.parse import urlparse
+                parsed = urlparse(segment.audio_path)
+                r2_key = parsed.path.lstrip("/")  # Remove leading slash
+                logger.debug(f"Converting old public URL to signed URL for segment {segment.id}")
+            else:
+                # Assume it's already just the key
+                r2_key = segment.audio_path
             
             # Generate signed URL valid for 1 hour
             response.audio_url = generate_signed_url(r2_key, expiration_seconds=3600)
-            logger.debug(f"Generated signed URL for segment {segment.id} (expires in 1h)")
+            logger.debug(f"Generated signed URL for segment {segment.id} (key: {r2_key[:50]}...)")
         except Exception as e:
             logger.error(f"Failed to generate signed URL for segment {segment.id}: {e}")
             response.audio_url = None  # Graceful fallback
