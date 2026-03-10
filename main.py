@@ -1,3 +1,19 @@
+"""
+Rekapo Backend - Meeting Summarizer API
+
+FastAPI application providing:
+- Real-time audio transcription via WebSocket
+- Google OAuth authentication
+- Session and recording management
+- Admin dashboard with analytics
+- Mobile and web client support
+
+Startup lifecycle:
+1. Initialize database (SQLAlchemy)
+2. Create upload directories
+3. Start background scheduler (statistics, cleanup)
+4. Mount routes and static files
+"""
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -18,6 +34,11 @@ from admin.admin_logs import router as admin_logs_router
 from db.db import init_db
 from config.config import PROFILE_PHOTOS_DIR
 from utils.scheduler import start_scheduler, stop_scheduler
+
+# ============================================================================
+# Application Lifespan Management
+# Handles startup initialization and graceful shutdown
+# ============================================================================
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -47,6 +68,11 @@ async def lifespan(app: FastAPI):
     stop_scheduler()
     logger.info("="*70)
 
+# ============================================================================
+# FastAPI Application Instance
+# Registers all routes, middleware, and static file serving
+# ============================================================================
+
 app = FastAPI(
     title="Rekapo - Meeting Summarizer API",
     description="Mobile-based near real-time meeting summarizer with Taglish support",
@@ -54,7 +80,10 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Add CORS middleware for mobile app support
+# ============================================================================
+# CORS Middleware
+# Allows mobile app and admin web interface to access API
+# ============================================================================
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # Change to specific origins in production
@@ -63,7 +92,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Register routes
+# ============================================================================
+# Route Registration
+# Mobile endpoints: /api/* (auth, users, sessions, transcription)
+# Admin endpoints: /admin/* (auth, users, sessions, logs, analytics)
+# ============================================================================
+
 app.include_router(transcribe_router, prefix="/api", tags=["Transcription"])
 app.include_router(auth_router, prefix="/api", tags=["Auth"])
 app.include_router(users_router, prefix="/api", tags=["Users"])
@@ -76,9 +110,18 @@ app.include_router(admin_sessions_router, tags=["Admin Sessions"])
 app.include_router(admin_user_analytics_router, tags=["Admin User Analytics"])
 app.include_router(admin_logs_router, tags=["Admin Logs"])
 
-# Mount static files for serving uploaded profile photos
+# ============================================================================
+# Static File Serving
+# Serves user-uploaded profile photos when R2 storage is disabled
+# Production should use R2 for better scalability
+# ============================================================================
 from config.config import UPLOADS_DIR
 app.mount("/uploads", StaticFiles(directory=str(UPLOADS_DIR)), name="uploads")
+
+# ============================================================================
+# Health Check and Info Endpoints
+# Provides API information and service health status
+# ============================================================================
 
 @app.get("/")
 async def root():

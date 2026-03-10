@@ -1,6 +1,19 @@
-"""  
-Modal client for calling deployed AI models
-Provides same interface as local inference files but calls Modal serverless functions
+""" 
+Modal Client for Serverless AI Model Inference
+
+Provides a unified interface for calling Modal-deployed GPU functions.
+When USE_MODAL=true in config, this replaces local model inference.
+
+Benefits:
+- Serverless GPU scaling (no idle costs)
+- Same API as local inference (drop-in replacement)
+- Automatic model caching in Modal volumes
+- Pay-per-use pricing
+
+Functions:
+- transcribe_audio_file(): Whisper speech-to-text
+- translate_text(): NLLB-200 translation
+- summarize_text(): Qwen text summarization
 """
 from typing import Optional, List, Dict, Any
 import modal

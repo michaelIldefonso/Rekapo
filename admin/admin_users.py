@@ -28,6 +28,7 @@ async def list_users(
 ):
     """
     Get paginated list of users with optional filters.
+    Admin-only endpoint - powers User Management screen with search and filters.
     
     Search:
     - Numeric input: Search by exact user ID
@@ -65,7 +66,7 @@ async def get_user_details(
 ):
     """
     Get detailed information about a specific user.
-    Admin access required.
+    Admin-only endpoint - retrieves full user profile and metadata.
     """
     logger.info("=== Admin viewing user details - Admin ID: %s, User ID: %s ===", 
                 current_admin.id, user_id)
@@ -92,7 +93,7 @@ async def disable_user(
 ):
     """
     Disable a user account.
-    Admin access required.
+    Admin-only endpoint - prevents user login and marks account as disabled.
     """
     logger.info("=== Admin disabling user - Admin ID: %s, Target User ID: %s ===", 
                 current_admin.id, user_id)

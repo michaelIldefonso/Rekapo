@@ -1,3 +1,8 @@
+"""
+Utility functions for Rekapo backend.
+Provides logging setup, email masking, file upload handling, and safe data serialization.
+Used across all modules for consistent logging and file operations.
+"""
 import logging
 import os
 from typing import Optional
@@ -5,6 +10,10 @@ from fastapi import UploadFile, HTTPException
 import uuid
 from pathlib import Path
 
+# ============================================================================
+# Logging Utilities
+# Provides consistent logging configuration across all modules
+# ============================================================================
 
 def get_logger(name: str) -> logging.Logger:
 	"""Create/get a module logger with sensible defaults.
@@ -31,6 +40,11 @@ def get_logger(name: str) -> logging.Logger:
 		logger.propagate = False
 	return logger
 
+
+# ============================================================================
+# Privacy Utilities
+# Mask sensitive data like emails for secure logging
+# ============================================================================
 
 def mask_email(email: Optional[str]) -> str:
 	"""Mask an email address for logging: j***@domain.com.
@@ -68,7 +82,11 @@ def safe_user_log_dict(user) -> dict:
 	}
 
 
-# File upload utilities
+# ============================================================================
+# File Upload Utilities
+# Handles profile photo uploads with validation and storage (R2/local)
+# ============================================================================
+
 ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
 MAX_PROFILE_PHOTO_SIZE = 5 * 1024 * 1024  # 5MB
 

@@ -24,3 +24,7 @@ python-dotenv
 requests
 boto3
 modal
+
+# Security testing tools (for thesis - OWASP compliance)
+bandit  # Python security linter
+safety  # Dependency vulnerability scanner

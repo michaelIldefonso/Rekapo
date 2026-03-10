@@ -12,7 +12,7 @@ logger = get_logger(__name__)
 # JWT configuration
 JWT_SECRET = os.getenv("JWT_SECRET", "your_jwt_secret")
 JWT_ALGORITHM = "HS256"
-JWT_EXPIRE_MINUTES = 60 * 24  # 1 day for admin sessions
+JWT_EXPIRE_MINUTES = 60 * 4  # 4 hours for admin sessions (security best practice)
 
 security = HTTPBearer()
 

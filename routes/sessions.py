@@ -16,7 +16,8 @@ from schemas.schemas import (
     RateSegmentResponse
 )
 from utils.utils import get_logger
-from config.config import USE_MODAL
+from config.config import USE_MODAL, R2_ENABLED
+from utils.r2_signed_urls import generate_signed_url
 
 # Dynamic import based on USE_MODAL config
 if USE_MODAL:
@@ -28,6 +29,35 @@ router = APIRouter()
 logger = get_logger(__name__)
 
 
+def _add_signed_url_to_segment(segment: RecordingSegment) -> SessionRecordingSegmentResponse:
+    """
+    Add time-limited signed URL to recording segment for secure audio access.
+    
+    Args:
+        segment: RecordingSegment database model
+    
+    Returns:
+        SessionRecordingSegmentResponse with signed URL (if R2 enabled)
+    """
+    # Convert to response model
+    response = SessionRecordingSegmentResponse.model_validate(segment)
+    
+    # Generate signed URL for R2 audio files (1 hour expiration)
+    if R2_ENABLED and segment.audio_path and segment.audio_path.startswith("r2://"):
+        try:
+            # Extract R2 key from r2://bucket/key format
+            r2_key = segment.audio_path.split("/", 3)[-1]  # Gets "key" from "r2://bucket/key"
+            
+            # Generate signed URL valid for 1 hour
+            response.audio_url = generate_signed_url(r2_key, expiration_seconds=3600)
+            logger.debug(f"Generated signed URL for segment {segment.id} (expires in 1h)")
+        except Exception as e:
+            logger.error(f"Failed to generate signed URL for segment {segment.id}: {e}")
+            response.audio_url = None  # Graceful fallback
+    
+    return response
+
+
 @router.post("/sessions", response_model=SessionResponse, status_code=status.HTTP_201_CREATED)
 async def create_session(
     request: CreateSessionRequest,
@@ -36,6 +66,7 @@ async def create_session(
 ):
     """
     Create a new meeting session.
+    Mobile app endpoint - called before starting a recording to initialize session tracking.
     
     - **session_title**: Optional title for the meeting (defaults to "Untitled Meeting")
     
@@ -76,7 +107,7 @@ async def create_session(
         db.commit()
         db.refresh(new_session)
         
-        logger.info(f"✅ User {current_user.id} created session {new_session.id}: '{new_session.session_title}'")
+        # Session created
         
         return SessionResponse.model_validate(new_session)
     
@@ -97,6 +128,7 @@ async def get_session(
 ):
     """
     Get details of a specific session.
+    Returns basic session info without transcripts/summaries (use /details for full data).
     
     Users can only access their own sessions.
     """
@@ -129,6 +161,7 @@ async def list_sessions(
 ):
     """
     List all sessions for the current user.
+    Mobile app endpoint - powers the Session History screen with pagination.
     
     - **skip**: Number of sessions to skip (for pagination)
     - **limit**: Maximum number of sessions to return (default 50, max 100)
@@ -159,6 +192,7 @@ async def update_session(
 ):
     """
     Update a session (title, status, or end_time).
+    Mobile app endpoint - used to update session title or mark session as completed/failed.
     
     - **session_title**: Update the session title
     - **status**: Update status ("recording", "completed", "failed")
@@ -202,7 +236,7 @@ async def update_session(
         db.commit()
         db.refresh(session)
         
-        logger.info(f"User {current_user.id} updated session {session_id}")
+        # Session updated
         
         return SessionResponse.model_validate(session)
     
@@ -225,6 +259,7 @@ async def delete_session(
 ):
     """
     Soft delete a session (marks as deleted, doesn't actually delete from database).
+    Mobile app endpoint - removes session from user's history view.
     """
     session = db.query(DBSession).filter(
         DBSession.id == session_id,
@@ -245,7 +280,7 @@ async def delete_session(
         
         db.commit()
         
-        logger.info(f"User {current_user.id} deleted session {session_id}")
+        # Session deleted
         
         return {
             "success": True,
@@ -271,6 +306,7 @@ async def get_session_details(
     """
     Get complete session details including all recording segments, transcriptions, 
     translations, and summaries.
+    Mobile app endpoint - powers the Session Details screen with full transcript data.
     
     Returns:
     - Session basic information (title, start/end time, status)
@@ -342,7 +378,7 @@ async def get_session_details(
         "status": session.status,
         "created_at": session.created_at,
         "recording_segments": [
-            SessionRecordingSegmentResponse.model_validate(segment)
+            _add_signed_url_to_segment(segment)
             for segment in recording_segments
         ],
         "summaries": [
@@ -353,7 +389,7 @@ async def get_session_details(
         "total_duration": total_duration
     }
     
-    logger.info(f"User {current_user.id} accessed details for session {session_id}")
+    # Session details retrieved
     
     return SessionDetailResponse(**response_data)
 
@@ -368,6 +404,7 @@ async def rate_segment(
 ):
     """
     Rate a recording segment for transcription quality.
+    Mobile app endpoint - allows users to rate transcription accuracy (1-5 stars).
     
     - **session_id**: The session ID that contains the segment
     - **segment_id**: The segment ID to rate
@@ -404,7 +441,7 @@ async def rate_segment(
     segment.rating = request.rating
     db.commit()
     
-    logger.info(f"User {current_user.id} rated segment {segment_id} (session {session_id}) with {request.rating} stars")
+    # Segment rated
     
     return RateSegmentResponse(
         success=True,
@@ -627,6 +664,10 @@ async def generate_full_session_summary(
 ):
     """
     Generate a full session summary from ALL segments.
+    
+    NOTE: Currently unused by mobile app. Final summaries are generated automatically
+    on WebSocket disconnect. This manual trigger endpoint is kept for future use
+    or debugging purposes.
     
     This should be called when the session is marked as "completed".
     Unlike the periodic 10-segment summaries, this creates a comprehensive

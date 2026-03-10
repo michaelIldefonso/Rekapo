@@ -1,13 +1,32 @@
 """
-Modal deployment for Rekapo AI models
-Deploys Whisper, NLLB, and Qwen models as serverless GPU functions
+Modal Deployment Configuration for Rekapo AI Models
+
+Deploys fine-tuned AI models as serverless GPU functions on Modal:
+1. Whisper (speech-to-text) - michaelildefonso/whisper-small-taglish-fine-tuned-ct2
+2. NLLB-200 (translation) - michaelildefonso/nllb-1.3b-ct2 
+3. Qwen (summarization) - Qwen/Qwen2.5-1.5B-Instruct
+
+Benefits:
+- Automatic GPU scaling (T4 or A10G)
+- Pay-per-use pricing (no idle costs)
+- Model caching in persistent volumes
+- Same interface as local inference
+
+Deployment:
+1. Set HUGGINGFACE_TOKEN secret in Modal
+2. Run: modal deploy modal_app.py
+3. Set USE_MODAL=true in backend config
 """
 import modal
 
 # Create Modal app
 app = modal.App("rekapo-ai")
 
-# Define base image with CUDA and cuDNN support
+# ============================================================================
+# Base Docker Image Configuration
+# CUDA 12.1 with cuDNN for GPU acceleration
+# Includes all dependencies for Whisper, NLLB, and Qwen models
+# ============================================================================
 base_image = (
     modal.Image.from_registry(
         "nvidia/cuda:12.1.0-cudnn8-devel-ubuntu22.04",  # devel has build tools

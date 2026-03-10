@@ -94,13 +94,8 @@ def log_to_mobile(message_type: str, data: dict, session_id: str = None):
         logger.error(f"📱 Error sent to mobile: {error}")
 
 # Log active AI inference and translation configuration
-logger.info("=" * 70)
-logger.info("🤖 AI Inference Mode")
-logger.info(f"   Using: {'Modal (Serverless GPU)' if USE_MODAL else 'Local Models'}")
-logger.info("🌐 Translation Configuration")
-logger.info(f"   Model: NLLB-200")
-logger.info(f"   Taglish Preprocessing: {'ENABLED' if ENABLE_TAGLISH_PREPROCESSING else 'DISABLED'}")
-logger.info("=" * 70)
+# Log startup configuration
+logger.info(f"AI Mode: {'Modal' if USE_MODAL else 'Local'} | Taglish: {'ON' if ENABLE_TAGLISH_PREPROCESSING else 'OFF'}")
 
 
 def translate_to_english(text: str, detected_lang: str = "tl") -> str:
@@ -234,6 +229,13 @@ async def cleanup_invalid_segment(temp_file_to_cleanup, audio_path, audio_path_s
 async def websocket_transcribe(websocket: WebSocket):
     """
     WebSocket endpoint for real-time meeting transcription.
+    
+    PRIMARY MOBILE APP ENDPOINT - handles audio streaming during recording:
+    - Receives audio chunks from mobile app
+    - Processes through VAD → Whisper ASR → Translation → Summarization pipeline
+    - Returns real-time transcripts and periodic summaries
+    - Generates final summary on disconnect/finalize
+    
     Designed for mobile voice recording with VAD-based chunking.
     
     Expected message format:
@@ -294,7 +296,7 @@ async def websocket_transcribe(websocket: WebSocket):
                 # This is sent only after client flushes pending chunks.
                 if message.get("action") == "finalize":
                     finalize_session_id = message.get("session_id", current_session_id)
-                    logger.info(f"🏁 Finalize requested - Session: {finalize_session_id}")
+                    logger.info(f"Finalizing session {finalize_session_id}")
 
                     finalizing_msg = {
                         "status": "finalizing",
@@ -347,7 +349,7 @@ async def websocket_transcribe(websocket: WebSocket):
                             "connections": [websocket]
                         }
                         manager.session_transcriptions[session_id] = []
-                        logger.info(f"📝 Session {session_id} initialized in connection manager")
+                        pass  # Session initialized
                 
                 # For processing messages and file naming, we may need a temporary number
                 # The real segment_number will be assigned after validation
@@ -444,7 +446,7 @@ async def websocket_transcribe(websocket: WebSocket):
                 else:
                     logger.debug(f"Using client-provided initial prompt: {initial_prompt[:80]}...")
                 
-                logger.info(f"🎙️ Starting transcription - Session: {session_id}, Model: {model or 'fine-tuned'}, Beam: {beam_size}, Temp: {temperature}")
+                # Starting transcription
                 
                 result = transcribe_audio_file(
                     str(audio_path),
@@ -459,7 +461,7 @@ async def websocket_transcribe(websocket: WebSocket):
                     initial_prompt=initial_prompt
                 )
                 
-                logger.info(f"✅ Transcription complete - Lang: {result['language']}, Confidence: {result['language_probability']:.2f}, Duration: {result['duration']:.2f}s")
+                # Transcription complete
                 
                 # Force detected language to be either Tagalog or English
                 # If Whisper detects another language, default to Tagalog
@@ -495,7 +497,7 @@ async def websocket_transcribe(websocket: WebSocket):
                         
                         changes_made = raw_whisper_text != preprocessed_text
                         if changes_made:
-                            logger.info(f"📝 Preprocessing applied - Session: {session_id}")
+                            pass  # Preprocessing applied
                             logger.debug(f"   Raw: {raw_whisper_text[:100]}")
                             logger.debug(f"   Preprocessed: {preprocessed_text[:100]}")
                         else:
@@ -618,7 +620,7 @@ async def websocket_transcribe(websocket: WebSocket):
                     )
                     db.add(recording_segment)
                     db.commit()
-                    logger.info(f"💾 Segment saved to database - Session: {session_id}, Segment: {segment_number}, Path: {audio_path_str}")
+                    # Segment saved to database
                 except Exception as e:
                     logger.error(f"❌ Database save error - Session: {session_id}, Segment: {segment_number}, Error: {e}")
                     db.rollback()
@@ -650,7 +652,7 @@ async def websocket_transcribe(websocket: WebSocket):
                 current_segment_count = manager.active_sessions.get(session_id, {}).get("segment_count", 0)
                 total_transcriptions = len(manager.get_transcriptions(session_id))
                 
-                logger.info(f"📊 Summarization Check - Session: {session_id}")
+                # Checking if summarization needed
                 logger.info(f"   Current Segment: #{segment_number}")
                 logger.info(f"   Total Segments: {current_segment_count}")
                 logger.info(f"   Buffered Transcriptions: {total_transcriptions}")

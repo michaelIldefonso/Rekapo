@@ -1,3 +1,8 @@
+"""
+Database models and session management for Rekapo.
+Defines SQLAlchemy ORM models for users, sessions, recordings, and system data.
+Supports both SQLite (development) and PostgreSQL (production).
+"""
 from sqlalchemy import (
     create_engine,
     Column,
@@ -21,7 +26,11 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
-# Database URL - use environment variable or default to SQLite
+# ============================================================================
+# Database Configuration
+# Supports SQLite (dev) and PostgreSQL (production)
+# Set DATABASE_URL env variable for production database
+# ============================================================================
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./rekapo.db")
 
 # Create engine with connection pool health checks for PostgreSQL
@@ -44,7 +53,10 @@ else:
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-# Dependency for FastAPI
+# ============================================================================
+# FastAPI Dependency
+# Provides database session to route handlers with automatic cleanup
+# ============================================================================
 def get_db():
     db = SessionLocal()
     try:
@@ -52,10 +64,14 @@ def get_db():
     finally:
         db.close()
 
+# ============================================================================
+# User Model
+# Stores user account information with Google OAuth integration
+# Supports profile customization, consent management, and admin access control
+# ============================================================================
 class User(Base):
     __tablename__ = "users"
     __table_args__ = (
-        # Documentation comment
         {"comment": "Stores user account information with Google OAuth integration"},
     )
     

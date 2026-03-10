@@ -124,15 +124,11 @@ class R2Client:
                 
                 logger.info(f"✅ Upload successful")
                 
-                # Return public URL if configured, otherwise return the key
-                if self.public_url:
-                    file_url = f"{self.public_url}/{key}"
-                    logger.info(f"🔗 Public URL: {file_url}")
-                    return file_url
-                else:
-                    file_uri = f"r2://{self.bucket_name}/{key}"
-                    logger.info(f"🔗 R2 URI: {file_uri}")
-                    return file_uri
+                # Return R2 key (NOT public URL for security)
+                # Use utils/r2_signed_urls.py to generate time-limited access URLs
+                file_uri = f"r2://{self.bucket_name}/{key}"
+                logger.info(f"🔗 R2 URI (private): {file_uri}")
+                return file_uri
                 
             except ClientError as e:
                 logger.error(f"❌ Failed to upload {key} to R2: {e}")
@@ -264,11 +260,8 @@ class R2Client:
                 
                 logger.info(f"Copied {source_key} to {dest_key} in R2")
                 
-                # Return public URL if configured, otherwise return the key
-                if self.public_url:
-                    return f"{self.public_url}/{dest_key}"
-                else:
-                    return f"r2://{self.bucket_name}/{dest_key}"
+                # Return R2 key (NOT public URL for security)
+                return f"r2://{self.bucket_name}/{dest_key}"
                 
             except ClientError as e:
                 logger.error(f"Failed to copy {source_key} to {dest_key} in R2: {e}")

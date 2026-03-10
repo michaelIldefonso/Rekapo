@@ -29,6 +29,10 @@ async def list_sessions(
     db: Session = Depends(get_db)
 ):
     """
+    Get paginated list of sessions with filters.
+    Admin-only endpoint - powers Session Management screen.
+    """
+    """
     Get paginated list of sessions with optional filters.
     Set require_consent=true to enforce training consent (cannot be bypassed).
     Admin access required.
@@ -71,10 +75,9 @@ async def get_session_detailed(
     db: Session = Depends(get_db)
 ):
     """
-    Get comprehensive session details including all recording segments,
-    transcriptions, translations, audio paths, and summaries.
-    Set require_consent=true to enforce training consent check (returns 403 if not consented).
-    Admin access required.
+    Get comprehensive session details including all recording segments and transcriptions.
+    Admin-only endpoint - NOTE: Currently unused by admin interface.
+    Set require_consent=true to enforce training consent check.
     """
     logger.info("=== Admin viewing detailed session - Admin ID: %s, Session ID: %s ===", 
                 current_admin.id, session_id)
@@ -110,13 +113,9 @@ async def get_training_session_data(
 ):
     """
     Get complete session data for AI training purposes.
-    Returns all recording segments, audio paths, transcriptions, translations, and summaries.
-    
-    SECURITY: This endpoint ALWAYS enforces training consent check.
-    Returns 403 Forbidden if user has not consented to training data usage.
-    Cannot be bypassed.
-    
-    Admin access required.
+    Admin-only endpoint - ALWAYS enforces training consent check.
+    Returns 403 if user hasn't consented to training data usage.
+    Cannot be bypassed. Admin access required.
     """
     logger.info("=== Admin accessing training data - Admin ID: %s, Session ID: %s ===", 
                 current_admin.id, session_id)

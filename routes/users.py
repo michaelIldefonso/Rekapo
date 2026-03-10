@@ -25,6 +25,7 @@ async def change_username(
 ):
     """
     Change the current user's username.
+    Mobile app endpoint - allows users to set/update their display username.
     
     - **username**: New username (3-50 characters, must be unique)
     """
@@ -80,39 +81,31 @@ async def upload_profile_photo(
 ):
     """
     Upload a new profile photo for the current user.
+    Mobile app endpoint - handles profile photo uploads with image validation.
     
     - **file**: Image file (JPG, PNG, GIF, WebP, max 5MB)
     """
-    logger.info(f"\ud83d\udcf8 Profile photo upload request from user {current_user.id}")
-    logger.info(f"\ud83d\udcc4 Filename: {file.filename}, Content-Type: {file.content_type}")
-    
     # Delete old profile photo if it exists and is a local file
     if current_user.profile_picture_path and not current_user.profile_picture_path.startswith("http"):
-        logger.info(f"\ud83d\uddd1\ufe0f Deleting old profile photo: {current_user.profile_picture_path}")
         delete_profile_photo(current_user.profile_picture_path)
     
     # Save new profile photo
     try:
         file_path = await save_profile_photo(file, current_user.id)
-        logger.info(f"\u2705 Profile photo saved successfully: {file_path}")
     except HTTPException as e:
-        logger.error(f"\u274c HTTPException during profile photo save: {e.detail}")
+        logger.error(f"Profile photo save failed: {e.detail}")
         raise
     except Exception as e:
-        logger.error(f"\u274c Unexpected error saving profile photo for user {current_user.id}: {type(e).__name__}: {str(e)}")
+        logger.error(f"Profile photo error for user {current_user.id}: {type(e).__name__}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to save profile photo"
         )
     
     # Update user's profile picture path
-    old_path = current_user.profile_picture_path
     current_user.profile_picture_path = file_path
     db.commit()
     db.refresh(current_user)
-    
-    logger.info(f"\ud83d\udcbe Database updated: {old_path} \u2192 {file_path}")
-    logger.info(f"\u2705 User {current_user.id} profile photo update complete!")
     
     return UploadProfilePhotoResponse(
         success=True,
@@ -127,6 +120,8 @@ async def get_current_user_profile(
 ):
     """
     Get the current user's profile information.
+    NOTE: Currently unused by mobile app (uses cached user data from login instead).
+    Available for future use if real-time profile refresh is needed.
     """
     return UserResponse.model_validate(current_user)
 
@@ -138,6 +133,7 @@ async def delete_current_user_photo(
 ):
     """
     Delete the current user's profile photo.
+    Mobile app endpoint - removes uploaded profile photos (keeps Google photos as reference only).
     """
     if not current_user.profile_picture_path:
         raise HTTPException(
@@ -172,6 +168,7 @@ async def update_data_usage_consent(
 ):
     """
     Update the current user's data usage consent.
+    Mobile app endpoint - toggles training data consent from Privacy Settings.
     
     - **data_usage_consent**: Boolean flag indicating consent (true/false)
     """

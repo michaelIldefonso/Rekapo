@@ -45,10 +45,12 @@ async def write_logs_to_database(
 ):
     """
     Write logs to database.
+    
+    Mobile app endpoint - receives batches of logs from mobile app for debugging/monitoring.
+    Logs are stored in database and can be viewed via admin panel.
     Endpoints: /api/logs/write or /api/logs/app
     """
-    logger.info("📥 Received log batch - User: %s, Logs: %d", 
-               current_user.id, len(log_batch.logs))
+    # Log batch received
     
     try:
         # Get batch timestamp (handle both field names from different mobile versions)
@@ -84,8 +86,7 @@ async def write_logs_to_database(
         db.add_all(log_entries)
         db.commit()
         
-        logger.info("✓ Logs written to database - User: %s, Count: %d", 
-                   current_user.id, len(log_batch.logs))
+        # Logs written to database
         
         return {
             "status": "success",

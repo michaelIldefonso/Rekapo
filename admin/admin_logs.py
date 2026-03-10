@@ -23,8 +23,8 @@ async def get_log_summary(
     db: Session = Depends(get_db)
 ):
     """
-    Get summary of logs from database (admin only).
-    Optionally filter by date.
+    Get aggregated log summary by date.
+    Admin-only endpoint - provides daily log counts by level (error/warn/info).
     """
     try:
         query = db.query(

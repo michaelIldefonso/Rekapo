@@ -1,3 +1,21 @@
+"""
+Admin Authentication Module
+
+Handles Google OAuth2 authentication for admin panel access.
+Implements secure admin-only login flow with JWT token generation.
+
+Endpoints:
+- GET /admin/auth/login - Initiates OAuth flow
+- GET /admin/auth/callback - Handles Google OAuth callback
+- POST /admin/auth/verify - Validates stored JWT tokens
+- POST /admin/auth/logout - Logout endpoint
+
+Security:
+- Only users with is_admin=True can access admin panel
+- Disabled accounts are rejected
+- JWT tokens for session management
+- Clock skew tolerance for token verification
+"""
 import os
 import dotenv
 from fastapi import APIRouter, HTTPException, Depends, status, Request
@@ -19,22 +37,32 @@ dotenv.load_dotenv()
 router = APIRouter()
 logger = get_logger(__name__)
 
-# Google OAuth2 configuration
+# ============================================================================
+# Google OAuth2 Configuration
+# Set these environment variables in .env file
+# GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET from Google Cloud Console
+# ============================================================================
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
 REDIRECT_URI = os.getenv("ADMIN_REDIRECT_URI", "http://localhost:8000/admin/auth/callback")
 ADMIN_FRONTEND_URL = os.getenv("ADMIN_FRONTEND_URL", "http://localhost:3000")
 
-# OAuth2 scopes
+# OAuth2 scopes - request email and profile information
 SCOPES = [
     'openid',
     'https://www.googleapis.com/auth/userinfo.email',
     'https://www.googleapis.com/auth/userinfo.profile'
 ]
 
+# ============================================================================
+# Helper Functions
+# ============================================================================
 
 def create_oauth_flow():
-    """Create and configure Google OAuth2 flow"""
+    """
+    Create and configure Google OAuth2 flow.
+    Used by both login initiation and callback handling.
+    """
     return Flow.from_client_config(
         {
             "web": {
@@ -49,12 +77,24 @@ def create_oauth_flow():
         redirect_uri=REDIRECT_URI
     )
 
+# ============================================================================
+# Admin Authentication Endpoints
+# ============================================================================
 
 @router.get("/admin/auth/login")
 async def admin_login():
     """
-    Initiate Google OAuth2 login flow for admin users.
-    Redirects to Google's consent screen.
+    ADMIN ENDPOINT: Initiate Google OAuth2 login flow.
+    
+    Flow:
+    1. Generate authorization URL with state parameter
+    2. Frontend redirects user to Google consent screen
+    3. User approves access
+    4. Google redirects to /admin/auth/callback
+    
+    Returns:
+        authorization_url: URL to redirect user to
+        state: Security state parameter
     """
     logger.info("=== Admin login initiated ===")
     
@@ -82,8 +122,20 @@ async def admin_login():
 @router.get("/admin/auth/callback")
 async def admin_callback(request: Request, db: Session = Depends(get_db)):
     """
-    Handle OAuth2 callback from Google.
-    Exchanges authorization code for tokens and creates/updates admin user.
+    ADMIN ENDPOINT: Handle OAuth2 callback from Google.
+    
+    Flow:
+    1. Receive authorization code from Google
+    2. Exchange code for ID token and access token
+    3. Verify ID token signature and claims
+    4. Check if user exists and is admin
+    5. Generate JWT token for admin session
+    6. Redirect to frontend with token
+    
+    Security checks:
+    - Verifies user.is_admin=True
+    - Rejects disabled accounts
+    - Includes clock skew tolerance for token verification
     """
     logger.info("=== Admin OAuth2 callback received ===")
     
@@ -106,15 +158,16 @@ async def admin_callback(request: Request, db: Session = Depends(get_db)):
         )
     
     try:
-        # Exchange authorization code for tokens
+        # Exchange authorization code for tokens from Google
         logger.info("Exchanging authorization code for tokens...")
         flow = create_oauth_flow()
-        flow.fetch_token(code=code)
+        flow.fetch_token(code=code)  # Makes POST request to Google's token endpoint
         
         credentials = flow.credentials
         
-        # Verify the ID token and get user info
-        # Add a short retry loop to tolerate small clock skew between machines
+        # Verify the ID token signature and claims
+        # Retry logic handles "Token used too early" errors from clock skew
+        # This can happen if backend clock is slightly behind Google's servers
         logger.info("Verifying ID token...")
         idinfo = None
         verify_exception = None
@@ -156,10 +209,11 @@ async def admin_callback(request: Request, db: Session = Depends(get_db)):
         name = idinfo.get("name")
         picture = idinfo.get("picture")
         
-        # Check if user exists
+        # Check if user exists in database
         user = db.query(User).filter_by(google_id=google_id).first()
         
         if not user:
+            # First-time Google login - create new user account (non-admin by default)
             # Create new user (non-admin by default)
             logger.info("Creating new user account (non-admin)")
             user = User(
@@ -178,14 +232,14 @@ async def admin_callback(request: Request, db: Session = Depends(get_db)):
         else:
             logger.info("Existing user found - ID: %s, Is Admin: %s", user.id, user.is_admin)
         
-        # Check if user is admin
+        # Security check: Only admin users can access admin panel
         if not user.is_admin:
             logger.warning("⚠️ Non-admin user attempted admin login - ID: %s", user.id)
             return RedirectResponse(
                 url=f"{ADMIN_FRONTEND_URL}/login?error=unauthorized"
             )
         
-        # Check if account is disabled
+        # Security check: Reject disabled accounts
         if user.is_disabled:
             logger.warning("⚠️ Disabled admin attempted login - ID: %s", user.id)
             return RedirectResponse(
@@ -215,8 +269,15 @@ async def verify_token(
     current_admin: User = Depends(get_current_admin)
 ):
     """
-    Verify admin JWT token and return user information.
-    Used by frontend to validate stored tokens.
+    ADMIN ENDPOINT: Verify admin JWT token and return user information.
+    
+    Used by frontend on page load to validate stored tokens.
+    If token is valid, returns fresh token and user data.
+    If token is invalid/expired, returns 401 error.
+    
+    Returns:
+        access_token: Fresh JWT token
+        user: Admin user information
     """
     logger.info("=== Admin token verified - User ID: %s ===", current_admin.id)
     
@@ -232,7 +293,11 @@ async def verify_token(
 @router.post("/admin/auth/logout")
 async def admin_logout(current_user: User = Depends(get_current_admin)):
     """
-    Logout endpoint (client should discard token).
+    ADMIN ENDPOINT: Logout endpoint.
+    
+    Note: JWT tokens are stateless, so logout happens client-side.
+    Frontend should discard the token from local storage.
+    This endpoint just logs the event for audit purposes.
     """
     logger.info("Admin user logged out - ID: %s", current_user.id)
     return {"message": "Logged out successfully"}

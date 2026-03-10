@@ -1,8 +1,25 @@
+"""
+Pydantic Schemas for Rekapo API
+
+Defines request/response models for data validation and serialization.
+Organized by feature:
+- User schemas: Authentication, profile management
+- Session schemas: Meeting lifecycle
+- Recording schemas: Audio segments and transcriptions
+- Summary schemas: AI-generated meeting summaries
+- WebSocket schemas: Real-time transcription messages
+- Admin schemas: Dashboard and analytics
+
+All schemas use Pydantic v2 with model_config for ORM compatibility.
+"""
 from pydantic import BaseModel, EmailStr, Field, ConfigDict
 from typing import Optional, List
 from datetime import datetime
 
+# ============================================================================
 # User Schemas
+# Used for authentication, profile management, and consent tracking
+# ============================================================================
 class UserBase(BaseModel):
     email: EmailStr
     name: Optional[str] = None
@@ -27,7 +44,10 @@ class UserResponse(UserBase):
     
     model_config = ConfigDict(from_attributes=True)
 
+# ============================================================================
 # Session Schemas
+# Manages meeting lifecycle from creation to completion
+# ============================================================================
 class CreateSessionRequest(BaseModel):
     session_title: Optional[str] = Field(default="Untitled Meeting", max_length=255, description="Title for the meeting session")
 
@@ -51,7 +71,11 @@ class SessionResponse(BaseModel):
     
     model_config = ConfigDict(from_attributes=True)
 
+# ============================================================================
 # Recording Segment Schemas
+# Handles individual audio chunks from WebSocket transcription
+# Each segment has transcript (Taglish) and translation (English)
+# ============================================================================
 class RecordingSegmentCreate(BaseModel):
     session_id: int
     segment_number: int
@@ -81,7 +105,10 @@ class RateSegmentResponse(BaseModel):
     segment_id: int
     rating: int
 
+# ============================================================================
 # Summary Schemas
+# AI-generated summaries produced every 10 segments or at session end
+# ============================================================================
 class SummaryCreate(BaseModel):
     session_id: int
     chunk_range_start: int
@@ -100,7 +127,10 @@ class SummaryResponse(BaseModel):
     
     model_config = ConfigDict(from_attributes=True)
 
+# ============================================================================
 # WebSocket Message Schemas
+# Real-time communication between mobile app and transcription service
+# ============================================================================
 class AudioChunkMessage(BaseModel):
     session_id: int
     segment_number: int
@@ -121,7 +151,10 @@ class TranscriptionResponse(BaseModel):
     duration: Optional[float] = None
     segments: Optional[List[dict]] = None
 
+# ============================================================================
 # User Profile Update Schemas
+# Mobile API schemas for profile customization
+# ============================================================================
 class ChangeUsernameRequest(BaseModel):
     username: str = Field(..., min_length=3, max_length=50, description="New username (3-50 characters)")
 
@@ -143,11 +176,16 @@ class DataUsageConsentResponse(BaseModel):
     message: str
     data_usage_consent: bool
 
+# ============================================================================
 # Session History Detail Schemas
+# Fetch complete session data with segments, transcriptions, and summaries
+# Used by mobile app's session history screen
+# ============================================================================
 class SessionRecordingSegmentResponse(BaseModel):
     id: int
     segment_number: int
-    audio_path: str
+    audio_path: str  # R2 key or local path
+    audio_url: Optional[str] = None  # Time-limited signed URL for secure access
     transcript_text: Optional[str] = None
     english_translation: Optional[str] = None
     rating: Optional[int] = None
