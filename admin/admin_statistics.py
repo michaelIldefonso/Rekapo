@@ -107,42 +107,6 @@ async def get_statistics_by_date(
     return SystemStatisticsResponse.model_validate(stat)
 
 
-@router.post("/admin/statistics", response_model=SystemStatisticsResponse, status_code=status.HTTP_201_CREATED)
-async def create_statistics(
-    request: CreateSystemStatisticsRequest,
-    current_admin: User = Depends(get_current_admin),
-    db: Session = Depends(get_db)
-):
-    """
-    Create new system statistics entry.
-    Admin access required.
-    """
-    logger.info("=== Admin creating statistics - Admin ID: %s, Date: %s ===", 
-                current_admin.id, request.stat_date)
-    
-    # Check if statistics already exist for this date
-    existing_stat = SystemStatisticsService.get_statistics_by_date(db, request.stat_date)
-    
-    if existing_stat:
-        logger.warning("Statistics already exist for date: %s", request.stat_date)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Statistics already exist for date: {request.stat_date}"
-        )
-    
-    # Create new statistics
-    stat = SystemStatisticsService.create_statistics(
-        db=db,
-        stat_date=request.stat_date,
-        total_users=request.total_users,
-        active_users=request.active_users,
-        total_sessions=request.total_sessions,
-        average_session_duration=request.average_session_duration
-    )
-    
-    logger.info("✓ Statistics created for date: %s", stat.stat_date)
-    return SystemStatisticsResponse.model_validate(stat)
-
 
 @router.put("/admin/statistics/{stat_id}", response_model=SystemStatisticsResponse)
 async def update_statistics(

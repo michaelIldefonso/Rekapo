@@ -572,39 +572,6 @@ async def get_logs_by_email(
         )
 
 
-@router.delete("/admin/logs/cleanup")
-async def cleanup_old_logs(
-    days: int = Query(30, ge=1, le=365, description="Delete logs older than N days"),
-    current_admin: User = Depends(get_current_admin),
-    db: Session = Depends(get_db)
-):
-    """
-    Delete logs older than specified days from database (admin only).
-    Default: 30 days, max: 365 days.
-    """
-    try:
-        cutoff_date = datetime.now() - timedelta(days=days)
-        
-        deleted_count = db.query(AppLog).filter(AppLog.timestamp < cutoff_date).delete()
-        db.commit()
-        
-        logger.info("✓ Cleaned up %d old log entries (Admin: %s, Days: %d, Cutoff: %s)", 
-                   deleted_count, current_admin.id, days, cutoff_date.date())
-        
-        return {
-            "deleted": deleted_count,
-            "days": days,
-            "cutoff_date": cutoff_date.isoformat()
-        }
-    
-    except Exception as e:
-        db.rollback()
-        logger.error("Error cleaning up logs: %s", str(e))
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to cleanup logs"
-        )
-
 
 def cleanup_old_logs_job():
     """
