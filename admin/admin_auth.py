@@ -34,8 +34,18 @@ from admin.utils import generate_admin_token, verify_admin_token, get_current_ad
 
 dotenv.load_dotenv()
 
+# Allow HTTP for local development (OAuth requires HTTPS in production)
+# Only enable this for localhost/127.0.0.1 URLs
+os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
+
 router = APIRouter()
 logger = get_logger(__name__)
+
+# ============================================================================
+# PKCE Code Verifier Storage
+# TODO: Replace with Redis/Database for production multi-worker deployment
+# ============================================================================
+_code_verifiers = {}  # Temporary in-memory storage: {state: code_verifier}
 
 # ============================================================================
 # Google OAuth2 Configuration
@@ -100,11 +110,18 @@ async def admin_login():
     
     try:
         flow = create_oauth_flow()
+        
+        # Generate authorization URL with PKCE
         authorization_url, state = flow.authorization_url(
             access_type='offline',
             include_granted_scopes='true',
             prompt='select_account'
         )
+        
+        # Store code_verifier for later use in callback
+        if hasattr(flow, 'code_verifier'):
+            _code_verifiers[state] = flow.code_verifier
+            logger.info("Stored code_verifier for state: %s", state[:10] + "...")
         
         logger.info("Generated authorization URL with state: %s", state[:10] + "...")
         return {
@@ -161,13 +178,20 @@ async def admin_callback(request: Request, db: Session = Depends(get_db)):
         # Exchange authorization code for tokens from Google
         logger.info("Exchanging authorization code for tokens...")
         flow = create_oauth_flow()
-        flow.fetch_token(code=code)  # Makes POST request to Google's token endpoint
+        
+        # Restore code_verifier if it was stored (PKCE support)
+        if state and state in _code_verifiers:
+            flow.code_verifier = _code_verifiers.pop(state)
+            logger.info("Restored code_verifier for state: %s", state[:10] + "...")
+        
+        # Use the full authorization response URL
+        authorization_response = str(request.url)
+        flow.fetch_token(authorization_response=authorization_response)
         
         credentials = flow.credentials
         
         # Verify the ID token signature and claims
-        # Retry logic handles "Token used too early" errors from clock skew
-        # This can happen if backend clock is slightly behind Google's servers
+        # Add clock skew tolerance to handle time differences between servers
         logger.info("Verifying ID token...")
         idinfo = None
         verify_exception = None
@@ -177,7 +201,8 @@ async def admin_callback(request: Request, db: Session = Depends(get_db)):
                 idinfo = id_token.verify_oauth2_token(
                     credentials.id_token,
                     grequests.Request(),
-                    GOOGLE_CLIENT_ID
+                    GOOGLE_CLIENT_ID,
+                    clock_skew_in_seconds=10  # Tolerate up to 10 seconds clock difference
                 )
                 verify_exception = None
                 break
@@ -188,7 +213,7 @@ async def admin_callback(request: Request, db: Session = Depends(get_db)):
                 # If token is 'used too early' it's likely a small clock skew; retry briefly
                 if "Token used too early" in msg or "token used too early" in msg.lower():
                     if attempt < max_attempts:
-                        wait = 2
+                        wait = 3  # Increased from 2 to 3 seconds
                         logger.info("Token appears from the future (clock skew). Waiting %s seconds before retry...", wait)
                         time.sleep(wait)
                         continue
