@@ -32,7 +32,12 @@ from admin.admin_sessions import router as admin_sessions_router
 from admin.admin_user_analytics import router as admin_user_analytics_router
 from admin.admin_logs import router as admin_logs_router
 from db.db import init_db
-from config.config import PROFILE_PHOTOS_DIR
+from config.config import (
+    PROFILE_PHOTOS_DIR,
+    CORS_ALLOWED_ORIGINS,
+    CORS_ALLOWED_ORIGIN_REGEX,
+    CORS_ALLOW_CREDENTIALS,
+)
 from utils.scheduler import start_scheduler, stop_scheduler
 
 # ============================================================================
@@ -86,8 +91,9 @@ app = FastAPI(
 # ============================================================================
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Change to specific origins in production
-    allow_credentials=True,
+    allow_origins=CORS_ALLOWED_ORIGINS,
+    allow_origin_regex=CORS_ALLOWED_ORIGIN_REGEX,
+    allow_credentials=CORS_ALLOW_CREDENTIALS,
     allow_methods=["*"],
     allow_headers=["*"],
 )

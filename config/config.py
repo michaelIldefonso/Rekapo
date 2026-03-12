@@ -7,6 +7,17 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
+
+def _parse_csv_env(name: str, default: str = "") -> list[str]:
+    """Parse comma-separated env var into a clean list of non-empty values."""
+    raw = os.getenv(name, default)
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+def _parse_bool_env(name: str, default: str = "false") -> bool:
+    """Parse boolean env var from common truthy values."""
+    return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "on"}
+
 # Load environment variables from .env file
 load_dotenv()
 
@@ -61,3 +72,15 @@ USE_MODAL = os.getenv("USE_MODAL", "true").lower() == "true"
 # Applies phonetic correction, dictionary lookup, and context analysis
 # ============================================================================
 ENABLE_TAGLISH_PREPROCESSING = os.getenv("ENABLE_TAGLISH_PREPROCESSING", "true").lower() == "true"
+
+# ============================================================================
+# CORS Configuration
+# CORS only applies to browsers (admin web panel). Native mobile apps are not
+# restricted by browser CORS and should be secured via JWT/authz.
+# ============================================================================
+CORS_ALLOWED_ORIGINS = _parse_csv_env(
+    "CORS_ALLOWED_ORIGINS",
+    "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000"
+)
+CORS_ALLOWED_ORIGIN_REGEX = os.getenv("CORS_ALLOWED_ORIGIN_REGEX", "").strip() or None
+CORS_ALLOW_CREDENTIALS = _parse_bool_env("CORS_ALLOW_CREDENTIALS", "true")
