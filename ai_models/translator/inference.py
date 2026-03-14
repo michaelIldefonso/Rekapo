@@ -129,11 +129,12 @@ def get_translator(model_name: str = None, device: str = "auto"):
             # Load tokenizer from HuggingFace
             tokenizer = AutoTokenizer.from_pretrained(model_name)
             
-            # Load CTranslate2 model
-            translator = ctranslate2.Translator(model_name, device=device, compute_type="int8")
+            # Default to float16 for better quality/consistency with Modal.
+            # If VRAM is not enough, switch compute_type to "int8".
+            translator = ctranslate2.Translator(model_name, device=device, compute_type="float16")
             
             _translator_cache[cache_key] = (translator, tokenizer, device)
-            print(f"✅ Loaded CTranslate2 NLLB-200 (int8 quantized) on {device}")
+            print(f"✅ Loaded CTranslate2 NLLB-200 (float16) on {device}")
         except Exception as e:
             raise RuntimeError(f"Failed to load translation model '{model_name}': {e}")
     
