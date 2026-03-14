@@ -1,3 +1,9 @@
+"""
+Module: admin/schemas.py.
+
+This module contains admin-only endpoints, schemas, and service helpers.
+"""
+
 from pydantic import BaseModel, ConfigDict
 from typing import Optional, List
 from datetime import date, datetime
@@ -177,3 +183,4 @@ class UpdateSystemStatisticsRequest(BaseModel):
     active_users: Optional[int] = None
     total_sessions: Optional[int] = None
     average_session_duration: Optional[float] = None
+

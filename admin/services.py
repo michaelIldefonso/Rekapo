@@ -1,3 +1,9 @@
+"""
+Module: admin/services.py.
+
+This module contains admin-only endpoints, schemas, and service helpers.
+"""
+
 import os
 from sqlalchemy.orm import Session
 from sqlalchemy import func, Date
@@ -844,3 +850,4 @@ class SystemStatisticsService:
                 total_sessions=total_sessions,
                 average_session_duration=float(avg_duration_minutes) if avg_duration_minutes else None
             )
+

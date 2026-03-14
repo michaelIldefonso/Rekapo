@@ -1,3 +1,9 @@
+"""
+Module: admin/admin_statistics.py.
+
+This module contains admin-only endpoints, schemas, and service helpers.
+"""
+
 import os
 import dotenv
 from fastapi import APIRouter, HTTPException, Depends, status, Query
@@ -199,3 +205,4 @@ async def calculate_statistics(
                 stat.stat_date, stat.total_users, stat.active_users, stat.total_sessions, stat.average_session_duration)
     
     return SystemStatisticsResponse.model_validate(stat)
+

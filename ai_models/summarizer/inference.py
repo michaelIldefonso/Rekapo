@@ -1,3 +1,9 @@
+"""
+Module: ai_models/summarizer/inference.py.
+
+This module contains AI inference pipeline components.
+"""
+
 from transformers import AutoTokenizer, AutoModelForCausalLM
 import torch
 import sys
@@ -8,7 +14,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from config.config import SUMMARIZER_MODEL_PATH
 
-# Global summarizer cache
+# Global summarizer cache.
+# Caching avoids repeated warm-up latency (tokenizer/model load) across requests.
 _summarizer_cache = {}
 
 def clear_summarizer_cache():
@@ -56,7 +63,7 @@ def get_summarizer(model_name: str = None, device: str = "auto"):
             device_name = "GPU" if device == "cuda" else "CPU"
             print(f"🖥️  Using device: {device_name}")
             
-            # Clear GPU memory before loading to prevent OOM
+            # Clear GPU memory before loading to reduce OOM risk on constrained GPUs.
             if device == "cuda":
                 import gc
                 print(f"🧹 Clearing GPU memory before loading model...")
@@ -74,7 +81,8 @@ def get_summarizer(model_name: str = None, device: str = "auto"):
             print(f"📥 Loading model with optimizations...")
             
             if device == "cuda":
-                # GPU: Use 4-bit quantization for memory efficiency
+                # GPU path prefers 4-bit quantization to keep inference viable on
+                # consumer GPUs while preserving acceptable summary quality.
                 try:
                     from transformers import BitsAndBytesConfig
                     
@@ -105,7 +113,7 @@ def get_summarizer(model_name: str = None, device: str = "auto"):
                         low_cpu_mem_usage=True
                     )
             else:
-                # CPU: Use float32
+                # CPU path uses float32 for numerical stability and compatibility.
                 model = AutoModelForCausalLM.from_pretrained(
                     model_name,
                     trust_remote_code=True,
@@ -116,7 +124,8 @@ def get_summarizer(model_name: str = None, device: str = "auto"):
             
             model.eval()  # Set to evaluation mode
             
-            # Enable gradient checkpointing for memory efficiency
+            # Keep checkpointing enabled for additional memory headroom.
+            # Even in eval mode this can help large models on limited VRAM.
             if hasattr(model, 'gradient_checkpointing_enable'):
                 model.gradient_checkpointing_enable()
             
@@ -370,3 +379,4 @@ def summarize_meeting_segments(
     
     except Exception as e:
         raise RuntimeError(f"Meeting segment summarization failed: {e}")
+

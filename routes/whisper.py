@@ -1,3 +1,9 @@
+"""
+Module: routes/whisper.py.
+
+This module contains HTTP route handlers and endpoint orchestration.
+"""
+
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import func

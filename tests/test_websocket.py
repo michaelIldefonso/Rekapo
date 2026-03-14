@@ -1,3 +1,9 @@
+"""
+Module: tests/test_websocket.py.
+
+This module contains test coverage and regression validation.
+"""
+
 import asyncio
 import websockets
 import json
@@ -67,3 +73,4 @@ if __name__ == "__main__":
         audio_path = input("Enter path to audio file (.wav, .mp3, etc.): ").strip()
     
     asyncio.run(test_websocket_with_audio(audio_path))
+

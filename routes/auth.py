@@ -1,3 +1,9 @@
+"""
+Module: routes/auth.py.
+
+This module contains HTTP route handlers and endpoint orchestration.
+"""
+
 import dotenv
 from fastapi import APIRouter, HTTPException, Depends, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -151,4 +157,5 @@ async def get_current_user(
         )
     
     return user
+
 

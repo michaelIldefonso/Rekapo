@@ -1,3 +1,9 @@
+"""
+Module: ai_models/whisper/inference.py.
+
+This module contains AI inference pipeline components.
+"""
+
 from faster_whisper import WhisperModel
 import os
 import re
@@ -28,7 +34,8 @@ def is_hallucination(text: str, no_speech_prob: float = 0.0) -> bool:
     
     text_lower = text.strip().lower()
     
-    # High no_speech probability = likely hallucination
+    # 0.6 is a practical midpoint: high enough to avoid deleting quiet speech,
+    # low enough to filter common silence-induced hallucinations.
     if no_speech_prob > 0.6:
         return True
     
@@ -116,7 +123,8 @@ def get_transcriber(model_name_or_path: str = None, device: str = "auto", comput
                 import torch
                 device = "cuda" if torch.cuda.is_available() else "cpu"
             
-            # Auto-select compute type based on device
+            # Auto-select compute type based on device: float16 for GPU throughput,
+            # int8 for CPU to keep latency and RAM usage practical.
             if compute_type == "auto":
                 compute_type = "float16" if device == "cuda" else "int8"
             
@@ -243,3 +251,4 @@ def transcribe_audio_file(
         }
     except Exception as e:
         raise RuntimeError(f"Transcription failed: {e}")
+

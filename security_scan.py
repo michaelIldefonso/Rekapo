@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """
 Security scanning script for Rekapo backend.
-Runs bandit (Python security linter) and safety (dependency vulnerability scanner).
+
+This module provides repeatable security checks for code and dependencies by
+running Bandit (Python SAST) and Safety (dependency vulnerability scanning).
 
 Usage:
     python security_scan.py
@@ -111,3 +113,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

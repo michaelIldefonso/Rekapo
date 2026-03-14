@@ -1,3 +1,9 @@
+"""
+Module: admin/admin_user_analytics.py.
+
+This module contains admin-only endpoints, schemas, and service helpers.
+"""
+
 import os
 import dotenv
 from fastapi import APIRouter, HTTPException, Depends, status, Query
@@ -84,3 +90,4 @@ async def get_users_analytics(
         time_period=time_period,
         analytics=[UserAnalyticsResponse(**analytics) for analytics in analytics_list]
     )
+

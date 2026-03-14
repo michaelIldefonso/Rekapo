@@ -1,3 +1,9 @@
+"""
+Module: admin/utils.py.
+
+This module contains admin-only endpoints, schemas, and service helpers.
+"""
+
 import os
 import jwt
 from datetime import datetime, timedelta
@@ -110,3 +116,4 @@ def validate_user_operation(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=detail
         )
+

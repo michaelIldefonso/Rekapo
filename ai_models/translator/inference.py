@@ -1,3 +1,9 @@
+"""
+Module: ai_models/translator/inference.py.
+
+This module contains AI inference pipeline components.
+"""
+
 from transformers import AutoTokenizer
 import ctranslate2
 import sys
@@ -87,16 +93,18 @@ def post_process_translation(translated: str, original: str) -> str:
     if translated and translated[0].islower():
         translated = translated[0].upper() + translated[1:]
     
-    # Check if translation is actually in English (basic heuristic)
-    # If it looks like it wasn't translated, return original
+    # Check if translation is actually in English (basic heuristic).
+    # The 0.8 cutoff is intentionally conservative: it catches obvious failures
+    # (for example untranslated non-Latin output) while avoiding aggressive
+    # fallback that could discard valid mixed-script entities.
     if len(translated) > 0:
         # Count Latin alphabet characters
         latin_chars = sum(1 for c in translated if c.isalpha() and ord(c) < 128)
         total_chars = sum(1 for c in translated if c.isalpha())
         
         if total_chars > 0 and latin_chars / total_chars < 0.8:
-            # Likely not properly translated (too many non-Latin chars)
-            # Return original as fallback
+            # Fallback to source text instead of returning low-confidence output.
+            # This keeps downstream summarization/debugging deterministic.
             return original
     
     return translated
@@ -130,7 +138,8 @@ def get_translator(model_name: str = None, device: str = "auto"):
             tokenizer = AutoTokenizer.from_pretrained(model_name)
             
             # Default to float16 for better quality/consistency with Modal.
-            # If VRAM is not enough, switch compute_type to "int8".
+            # If VRAM becomes a bottleneck, switching to int8 is the primary
+            # quality-vs-memory trade-off knob.
             translator = ctranslate2.Translator(model_name, device=device, compute_type="float16")
             
             _translator_cache[cache_key] = (translator, tokenizer, device)
@@ -184,7 +193,8 @@ def translate_text(
             "preprocessing_info": None
         }
     
-    # Apply preprocessing for Taglish to English translation
+    # Restrict preprocessing to Tagalog->English where the correction dictionary
+    # was tuned. Applying it to other language pairs can over-correct terms.
     preprocessing_result = None
     input_text = text
     
@@ -400,3 +410,4 @@ def auto_detect_and_translate(
     
     result["is_english"] = False
     return result
+

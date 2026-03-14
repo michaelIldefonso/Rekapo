@@ -1,3 +1,9 @@
+"""
+Module: admin/admin_users.py.
+
+This module contains admin-only endpoints, schemas, and service helpers.
+"""
+
 import os
 import dotenv
 from fastapi import APIRouter, HTTPException, Depends, status, Query
@@ -270,3 +276,4 @@ async def delete_user(
                 user_id, mask_email(user_email))
     
     return {"message": "User deleted successfully", "user_id": user_id}
+

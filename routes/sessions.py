@@ -1,3 +1,9 @@
+"""
+Module: routes/sessions.py.
+
+This module contains HTTP route handlers and endpoint orchestration.
+"""
+
 from fastapi import APIRouter, HTTPException, Depends, status, BackgroundTasks
 from sqlalchemy.orm import Session
 from datetime import datetime
@@ -720,4 +726,5 @@ async def generate_full_session_summary(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to generate session summary: {str(e)}"
         )
+
 

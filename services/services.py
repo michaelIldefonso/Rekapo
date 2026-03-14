@@ -1,3 +1,9 @@
+"""
+Module: services/services.py.
+
+This module contains backend operations and API support.
+"""
+
 from fastapi import WebSocket
 from typing import List, Dict, Optional
 from datetime import datetime
@@ -137,3 +143,4 @@ class ConnectionManager:
             segment_count = self.active_sessions[session_id]["segment_count"]
             return segment_count > 0 and segment_count % chunk_threshold == 0
         return False
+

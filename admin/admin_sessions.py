@@ -1,3 +1,9 @@
+"""
+Module: admin/admin_sessions.py.
+
+This module contains admin-only endpoints, schemas, and service helpers.
+"""
+
 import os
 import dotenv
 from fastapi import APIRouter, HTTPException, Depends, status, Query
@@ -185,3 +191,4 @@ async def delete_session(
                 session.id, session.user_id)
     
     return {"message": "Session deleted successfully", "session_id": session_id}
+

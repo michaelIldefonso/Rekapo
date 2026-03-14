@@ -1,3 +1,9 @@
+"""
+Module: routes/users.py.
+
+This module contains HTTP route handlers and endpoint orchestration.
+"""
+
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, status
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
@@ -185,3 +191,4 @@ async def update_data_usage_consent(
         message="Data usage consent updated successfully",
         data_usage_consent=current_user.data_usage_consent
     )
+
