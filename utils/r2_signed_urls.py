@@ -6,7 +6,7 @@ Usage:
     from utils.r2_signed_urls import generate_signed_url
     
     # In your API endpoint:
-    audio_url = generate_signed_url(session.r2_audio_key, expiration_seconds=3600)
+    audio_url = generate_signed_url(session.r2_audio_key, expiration_seconds=R2_AUDIO_SIGNED_URL_EXPIRY_SECONDS)
 """
 
 import boto3
@@ -26,6 +26,7 @@ from config.config import (
     R2_PROFILE_PHOTOS_PREFIX,
     R2_PROFILE_PHOTO_SIGNED_URL_EXPIRY_SECONDS,
     R2_PROFILE_PHOTO_SIGNED_URL_CACHE_SECONDS,
+    R2_AUDIO_SIGNED_URL_EXPIRY_SECONDS,
 )
 from utils.utils import get_logger
 
@@ -306,15 +307,15 @@ async def get_session_audio_url(
     if not verify_file_exists(session.r2_audio_key):
         raise HTTPException(status_code=404, detail="Audio file not found in storage")
     
-    # Generate signed URL valid for 1 hour
+    # Generate signed URL
     signed_url = generate_signed_url(
         session.r2_audio_key,
-        expiration_seconds=3600
+        expiration_seconds=R2_AUDIO_SIGNED_URL_EXPIRY_SECONDS
     )
     
     return {
         "audio_url": signed_url,
-        "expires_in_seconds": 3600,
+        "expires_in_seconds": R2_AUDIO_SIGNED_URL_EXPIRY_SECONDS,
         "session_id": session_id
     }
 """

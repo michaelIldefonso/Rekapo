@@ -50,6 +50,9 @@ R2_PROFILE_PHOTO_SIGNED_URL_EXPIRY_SECONDS = int(
 R2_PROFILE_PHOTO_SIGNED_URL_CACHE_SECONDS = int(
     os.getenv("R2_PROFILE_PHOTO_SIGNED_URL_CACHE_SECONDS", "600")
 )
+R2_AUDIO_SIGNED_URL_EXPIRY_SECONDS = int(
+    os.getenv("R2_AUDIO_SIGNED_URL_EXPIRY_SECONDS", "300")
+)
 
 # R2 storage paths (prefixes for organizing files in bucket)
 R2_PROFILE_PHOTOS_PREFIX = "profile_photos"
