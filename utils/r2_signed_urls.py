@@ -10,6 +10,10 @@ Usage:
 """
 
 import boto3
+import time
+from functools import lru_cache
+from threading import Lock
+from urllib.parse import urlparse
 from botocore.config import Config
 from botocore.exceptions import ClientError
 from config.config import (
@@ -17,13 +21,20 @@ from config.config import (
     R2_ACCESS_KEY_ID,
     R2_SECRET_ACCESS_KEY,
     R2_BUCKET_NAME,
-    R2_ENABLED
+    R2_ENABLED,
+    R2_PUBLIC_URL,
+    R2_PROFILE_PHOTOS_PREFIX,
+    R2_PROFILE_PHOTO_SIGNED_URL_EXPIRY_SECONDS,
+    R2_PROFILE_PHOTO_SIGNED_URL_CACHE_SECONDS,
 )
 from utils.utils import get_logger
 
 logger = get_logger(__name__)
+_SIGNED_URL_CACHE: dict[tuple[str, int], tuple[str, float]] = {}
+_SIGNED_URL_CACHE_LOCK = Lock()
 
 
+@lru_cache(maxsize=1)
 def get_r2_client():
     """
     Create and return an S3-compatible client for Cloudflare R2.
@@ -105,6 +116,91 @@ def generate_signed_url(
     except ClientError as e:
         logger.error(f"Error generating signed URL for {file_key}: {e}")
         raise
+
+
+def generate_signed_url_cached(
+    file_key: str,
+    expiration_seconds: int = 3600,
+    cache_seconds: int | None = None,
+) -> str:
+    """
+    Generate a signed URL with in-memory TTL caching.
+
+    This reduces repeated presign operations for frequently accessed files.
+    """
+    effective_cache_seconds = (
+        R2_PROFILE_PHOTO_SIGNED_URL_CACHE_SECONDS
+        if cache_seconds is None
+        else max(0, cache_seconds)
+    )
+
+    if effective_cache_seconds == 0:
+        return generate_signed_url(file_key, expiration_seconds=expiration_seconds)
+
+    now = time.time()
+    cache_key = (file_key, expiration_seconds)
+
+    with _SIGNED_URL_CACHE_LOCK:
+        cached = _SIGNED_URL_CACHE.get(cache_key)
+        if cached:
+            cached_url, expires_at = cached
+            if now < expires_at:
+                return cached_url
+
+    signed_url = generate_signed_url(file_key, expiration_seconds=expiration_seconds)
+
+    with _SIGNED_URL_CACHE_LOCK:
+        _SIGNED_URL_CACHE[cache_key] = (signed_url, now + effective_cache_seconds)
+
+    return signed_url
+
+
+def resolve_profile_photo_url(file_path: str | None) -> str | None:
+    """
+    Resolve stored profile photo path into a client-usable URL.
+
+    - External provider URLs (e.g., Google photos) are returned unchanged.
+    - R2 object references are converted to short-lived signed URLs.
+    - Local paths are returned as-is.
+    """
+    if not file_path:
+        return file_path
+
+    # Keep non-R2 external URLs unchanged (e.g., Google profile images).
+    if file_path.startswith("http") and "r2.dev" not in file_path:
+        if not R2_PUBLIC_URL or not file_path.startswith(R2_PUBLIC_URL):
+            return file_path
+
+    if not R2_ENABLED:
+        return file_path
+
+    r2_key = None
+
+    if file_path.startswith("r2://"):
+        parts = file_path.split("/", 3)
+        if len(parts) >= 4:
+            r2_key = parts[3]
+    elif file_path.startswith("http"):
+        parsed = urlparse(file_path)
+        r2_key = parsed.path.lstrip("/")
+    elif file_path.startswith(f"{R2_PROFILE_PHOTOS_PREFIX}/"):
+        r2_key = file_path
+
+    if not r2_key:
+        return file_path
+
+    try:
+        return generate_signed_url_cached(
+            r2_key,
+            expiration_seconds=R2_PROFILE_PHOTO_SIGNED_URL_EXPIRY_SECONDS,
+            cache_seconds=min(
+                R2_PROFILE_PHOTO_SIGNED_URL_CACHE_SECONDS,
+                max(1, R2_PROFILE_PHOTO_SIGNED_URL_EXPIRY_SECONDS - 30),
+            ),
+        )
+    except Exception as e:
+        logger.warning("Failed to sign profile photo URL for %s: %s", r2_key, e)
+        return file_path
 
 
 def generate_upload_signed_url(

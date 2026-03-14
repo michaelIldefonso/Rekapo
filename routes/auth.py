@@ -16,6 +16,7 @@ import os
 from db.db import get_db, User
 from utils.utils import get_logger, mask_email, safe_user_log_dict
 from schemas.schemas import UserResponse
+from utils.r2_signed_urls import resolve_profile_photo_url
 from datetime import datetime, timedelta
 
 dotenv.load_dotenv()
@@ -109,9 +110,14 @@ def google_mobile_auth(payload: GoogleAuthRequest, db: Session = Depends(get_db)
     }
     access_token = jwt.encode(token_data, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
+    response_user = UserResponse.model_validate(user)
+    response_user.profile_picture_path = resolve_profile_photo_url(
+        response_user.profile_picture_path
+    )
+
     return AuthResponse(
         access_token=access_token,
-        user=UserResponse.model_validate(user)
+        user=response_user
     )
 
 # Dependency to get current user from JWT token

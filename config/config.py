@@ -44,6 +44,12 @@ R2_SECRET_ACCESS_KEY = os.getenv("R2_SECRET_ACCESS_KEY")
 R2_BUCKET_NAME = os.getenv("R2_BUCKET_NAME", "rekapo")
 R2_REGION = os.getenv("R2_REGION", "auto")
 R2_PUBLIC_URL = os.getenv("R2_PUBLIC_URL", "")
+R2_PROFILE_PHOTO_SIGNED_URL_EXPIRY_SECONDS = int(
+    os.getenv("R2_PROFILE_PHOTO_SIGNED_URL_EXPIRY_SECONDS", "900")
+)
+R2_PROFILE_PHOTO_SIGNED_URL_CACHE_SECONDS = int(
+    os.getenv("R2_PROFILE_PHOTO_SIGNED_URL_CACHE_SECONDS", "600")
+)
 
 # R2 storage paths (prefixes for organizing files in bucket)
 R2_PROFILE_PHOTOS_PREFIX = "profile_photos"

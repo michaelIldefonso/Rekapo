@@ -18,6 +18,7 @@ from schemas.schemas import (
     DataUsageConsentResponse
 )
 from utils.utils import save_profile_photo, delete_profile_photo, get_logger
+from utils.r2_signed_urls import resolve_profile_photo_url
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -112,11 +113,13 @@ async def upload_profile_photo(
     current_user.profile_picture_path = file_path
     db.commit()
     db.refresh(current_user)
+
+    response_path = resolve_profile_photo_url(file_path)
     
     return UploadProfilePhotoResponse(
         success=True,
         message="Profile photo updated successfully",
-        profile_picture_path=file_path
+        profile_picture_path=response_path
     )
 
 
@@ -129,7 +132,11 @@ async def get_current_user_profile(
     NOTE: Currently unused by mobile app (uses cached user data from login instead).
     Available for future use if real-time profile refresh is needed.
     """
-    return UserResponse.model_validate(current_user)
+    response_user = UserResponse.model_validate(current_user)
+    response_user.profile_picture_path = resolve_profile_photo_url(
+        response_user.profile_picture_path
+    )
+    return response_user
 
 
 @router.delete("/users/me/photo")
